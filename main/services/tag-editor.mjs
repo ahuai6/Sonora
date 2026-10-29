@@ -191,68 +191,97 @@ export class TagEditor {
     return this.commit(
       id,
       patch.revision,
-      async (temp) => {
-        const f = File.createFromPath(temp);
-        try {
-          if (!f.isWritable || f.isPossiblyCorrupt)
-            throw Error("此文件不支持安全写入标签，原文件未修改");
-          for (const [key, value] of Object.entries(input.tags)) {
-            if (key in arrays)
-              f.tag[arrays[key]] = value
-                .split(/\s*;\s*/)
-                .map((x) => x.trim())
-                .filter(Boolean);
-            else f.tag[scalar[key] || numbers[key]] = value;
-          }
-          if (input.lyrics !== undefined) f.tag.lyrics = input.lyrics;
-          if (input.artwork === null) f.tag.pictures = [];
-          else if (input.artwork) {
-            const p = Picture.fromData(
-              ByteVector.fromByteArray(input.artwork.data),
-            );
-            p.type = PictureType.FrontCover;
-            p.mimeType = input.artwork.mime;
-            p.description = "Front cover";
-            f.tag.pictures = [
-              p,
-              ...f.tag.pictures.filter(
-                (p) => p.type !== PictureType.FrontCover,
-              ),
-            ];
-          }
-          f.save();
-        } finally {
-          f.dispose();
-        }
-        const saved = readTags(temp);
-        for (const [key, value] of Object.entries(input.tags)) {
-          const expected =
-            key in arrays
-              ? value
-                  .split(/\s*;\s*/)
-                  .map((x) => x.trim())
-                  .filter(Boolean)
-                  .join("; ")
-              : value;
-          if (saved.tags[key] !== expected)
-            throw Error(`此格式未能保存 ${key} 标签，原文件未修改`);
-        }
-        if (
-          input.lyrics !== undefined &&
-          saved.lyrics.replace(/\r\n/g, "\n") !==
-            input.lyrics.replace(/\r\n/g, "\n")
-        )
-          throw Error("此格式未能保存内嵌歌词，原文件未修改");
-        if (
-          input.artwork &&
-          !saved.pictures.some((p) => p.data.equals(input.artwork.data))
-        )
-          throw Error("封面写入验证失败，原文件未修改");
-        if (input.artwork === null && saved.pictures.length)
-          throw Error("封面移除验证失败，原文件未修改");
-      },
+      (temp) => this.writeTags(temp, input),
       { copyTo },
     );
+  }
+  async writeTags(temp, input) {
+    const f = File.createFromPath(temp);
+    try {
+      if (!f.isWritable || f.isPossiblyCorrupt)
+        throw Error("此文件不支持安全写入标签，原文件未修改");
+      for (const [key, value] of Object.entries(input.tags)) {
+        if (key in arrays)
+          f.tag[arrays[key]] = value
+            .split(/\s*;\s*/)
+            .map((x) => x.trim())
+            .filter(Boolean);
+        else f.tag[scalar[key] || numbers[key]] = value;
+      }
+      if (input.lyrics !== undefined) f.tag.lyrics = input.lyrics;
+      if (input.artwork === null) f.tag.pictures = [];
+      else if (input.artwork) {
+        const p = Picture.fromData(
+          ByteVector.fromByteArray(input.artwork.data),
+        );
+        p.type = PictureType.FrontCover;
+        p.mimeType = input.artwork.mime;
+        p.description = "Front cover";
+        f.tag.pictures = [
+          p,
+          ...f.tag.pictures.filter((p) => p.type !== PictureType.FrontCover),
+        ];
+      }
+      f.save();
+    } finally {
+      f.dispose();
+    }
+    const saved = readTags(temp);
+    for (const [key, value] of Object.entries(input.tags)) {
+      const expected =
+        key in arrays
+          ? value
+              .split(/\s*;\s*/)
+              .map((x) => x.trim())
+              .filter(Boolean)
+              .join("; ")
+          : value;
+      if (saved.tags[key] !== expected)
+        throw Error(`此格式未能保存 ${key} 标签，原文件未修改`);
+    }
+    if (
+      input.lyrics !== undefined &&
+      saved.lyrics.replace(/\r\n/g, "\n") !==
+        input.lyrics.replace(/\r\n/g, "\n")
+    )
+      throw Error("此格式未能保存内嵌歌词，原文件未修改");
+    if (
+      input.artwork &&
+      !saved.pictures.some((p) => p.data.equals(input.artwork.data))
+    )
+      throw Error("封面写入验证失败，原文件未修改");
+    if (input.artwork === null && saved.pictures.length)
+      throw Error("封面移除验证失败，原文件未修改");
+  }
+  // Download-only staging: the original .part remains intact until final commit.
+  async stageDownload(file, extension, patch, { signal } = {}) {
+    if (!/^[a-z0-9]{2,5}$/.test(extension)) throw Error("音频格式不正确");
+    const input = this.validate(patch),
+      staged = file + "." + extension;
+    let created = false,
+      keep = false;
+    try {
+      signal?.throwIfAborted();
+      await fs.promises.copyFile(file, staged, fs.constants.COPYFILE_EXCL);
+      created = true;
+      await this.writeTags(staged, input);
+      const [before, after] = await Promise.all([
+        parseFile(file),
+        parseFile(staged),
+      ]);
+      if (
+        before.format.codec !== after.format.codec ||
+        before.format.numberOfChannels !== after.format.numberOfChannels ||
+        Math.abs((before.format.duration || 0) - (after.format.duration || 0)) >
+          0.5
+      )
+        throw Error("标签写入后的音频校验失败，下载音频未修改");
+      signal?.throwIfAborted();
+      keep = true;
+      return staged;
+    } finally {
+      if (created && !keep) await fs.promises.unlink(staged).catch(() => {});
+    }
   }
   async restore(id, expectedRevision) {
     const backup = this.store.data.tagBackups?.[id];

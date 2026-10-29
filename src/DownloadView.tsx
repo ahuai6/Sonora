@@ -17,6 +17,7 @@ const labels: Record<string, string> = {
   queued: "等待中",
   resolving: "获取音源",
   downloading: "下载中",
+  tagging: "匹配标签",
   completed: "已完成",
   failed: "失败",
   paused: "已暂停",
@@ -36,11 +37,13 @@ export default function DownloadView({
     (j) =>
       filter === "all" ||
       (filter === "active" &&
-        ["queued", "resolving", "downloading", "paused"].includes(j.status)) ||
+        ["queued", "resolving", "downloading", "tagging", "paused"].includes(
+          j.status,
+        )) ||
       filter === j.status,
   );
   const active = jobs.filter((j) =>
-    ["queued", "resolving", "downloading"].includes(j.status),
+    ["queued", "resolving", "downloading", "tagging"].includes(j.status),
   ).length;
   const action = (id: string, a: string) =>
     window.sonora
@@ -88,9 +91,13 @@ export default function DownloadView({
                   (j) =>
                     k === "all" ||
                     (k === "active" &&
-                      ["queued", "resolving", "downloading", "paused"].includes(
-                        j.status,
-                      )) ||
+                      [
+                        "queued",
+                        "resolving",
+                        "downloading",
+                        "tagging",
+                        "paused",
+                      ].includes(j.status)) ||
                     k === j.status,
                 ).length
               }
@@ -122,7 +129,13 @@ export default function DownloadView({
                   <i style={{ width: j.progress + "%" }} />
                 </div>
                 <div className="download-caption">
-                  <span title={j.message}>{j.message}</span>
+                  <span
+                    title={[j.message, ...(j.metadata?.warnings || [])].join(
+                      "\n",
+                    )}
+                  >
+                    {j.message}
+                  </span>
                   <span>
                     {bytes(j.received)}
                     {j.total ? ` / ${bytes(j.total)}` : ""}
@@ -135,23 +148,28 @@ export default function DownloadView({
                   <CheckCircle2 size={15} />
                 ) : j.status === "failed" ? (
                   <AlertCircle size={15} />
-                ) : ["resolving", "downloading"].includes(j.status) ? (
+                ) : ["resolving", "downloading", "tagging"].includes(
+                    j.status,
+                  ) ? (
                   <Loader2 size={15} className="spin" />
                 ) : null}
                 {labels[j.status]}
                 {j.status === "downloading" && j.total ? ` ${j.progress}%` : ""}
               </span>
               <div className="row-actions">
-                {["queued", "resolving", "downloading"].includes(j.status) && (
-                  <button
-                    className="icon-button"
-                    title="暂停"
-                    aria-label="暂停下载"
-                    onClick={() => action(j.id, "pause")}
-                  >
-                    <Pause size={17} />
-                  </button>
-                )}
+                {["queued", "resolving", "downloading", "tagging"].includes(
+                  j.status,
+                ) &&
+                  !j.path && (
+                    <button
+                      className="icon-button"
+                      title="暂停"
+                      aria-label="暂停下载"
+                      onClick={() => action(j.id, "pause")}
+                    >
+                      <Pause size={17} />
+                    </button>
+                  )}
                 {["paused", "failed", "cancelled"].includes(j.status) && (
                   <button
                     className="icon-button"
@@ -172,7 +190,8 @@ export default function DownloadView({
                     <FolderOpen size={18} />
                   </button>
                 ) : (
-                  j.status !== "cancelled" && (
+                  j.status !== "cancelled" &&
+                  !j.path && (
                     <button
                       className="icon-button"
                       title="取消下载"
@@ -183,7 +202,9 @@ export default function DownloadView({
                     </button>
                   )
                 )}
-                {!["resolving", "downloading", "queued"].includes(j.status) && (
+                {!["resolving", "downloading", "tagging", "queued"].includes(
+                  j.status,
+                ) && (
                   <button
                     className="icon-button"
                     title="移除任务记录"

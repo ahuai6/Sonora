@@ -346,8 +346,32 @@ try {
     )
     .toBe(1);
   const state = await page.evaluate(() => window.sonora.bootstrap());
-  assert.deepEqual(fs.readFileSync(state.downloads[0].path), audio);
+  const downloaded = fs.readFileSync(state.downloads[0].path);
+  let dataOffset = 12;
+  while (downloaded.subarray(dataOffset, dataOffset + 4).toString() !== "data")
+    dataOffset +=
+      8 +
+      downloaded.readUInt32LE(dataOffset + 4) +
+      (downloaded.readUInt32LE(dataOffset + 4) % 2);
+  assert.deepEqual(
+    downloaded.subarray(dataOffset + 8, dataOffset + 8 + 32000),
+    audio.subarray(44),
+  );
+  assert.equal(state.downloads[0].metadata.status, "written");
   assert.equal(state.library.length, 1);
+  assert.match(state.library[0].cover, /^sonora-media:\/\/cover\//);
+  const downloadedTags = await page.evaluate(async () => {
+    const b = await window.sonora.bootstrap();
+    return (await window.sonora.tagRead(b.library[0].id)).tags;
+  });
+  assert.equal(downloadedTags.title, "测试音轨 1");
+  assert.equal(downloadedTags.year, 2020);
+  assert.equal(downloadedTags.track, 3);
+  assert.equal(downloadedTags.discCount, 2);
+  assert.equal(downloadedTags.genre, "J-Pop");
+  assert.equal(downloadedTags.composer, "Fixture Composer");
+  assert.equal(downloadedTags.isrc, "TEST26000001");
+  checks++;
   checks++;
   await page
     .getByRole("button", { name: "下载中心", exact: false })
@@ -577,6 +601,31 @@ try {
   await editor.getByRole("button", { name: "关闭", exact: true }).click();
   checks += 6;
   await page.getByRole("button", { name: "偏好与音源", exact: true }).click();
+  const autoTags = page.getByRole("switch", {
+    name: "自动匹配并写入标签",
+    exact: true,
+  });
+  await expect(autoTags).toHaveAttribute("aria-checked", "true");
+  await autoTags.click();
+  await expect
+    .poll(() =>
+      page.evaluate(
+        async () => (await window.sonora.bootstrap()).settings.autoMetadata,
+      ),
+    )
+    .toBe(false);
+  await page.getByRole("button", { name: "本地音乐", exact: true }).click();
+  await page.getByRole("button", { name: "偏好与音源", exact: true }).click();
+  await expect(autoTags).toHaveAttribute("aria-checked", "false");
+  await autoTags.click();
+  await expect
+    .poll(() =>
+      page.evaluate(
+        async () => (await window.sonora.bootstrap()).settings.autoMetadata,
+      ),
+    )
+    .toBe(true);
+  checks++;
   await page.getByLabel("使用的音源", { exact: true }).selectOption("builtin");
   await expect
     .poll(() =>

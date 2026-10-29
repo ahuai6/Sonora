@@ -584,7 +584,7 @@ export default function App() {
     );
   }, [boot?.library, favorites, libraryQuery, librarySort]);
   const activeDownloads = (boot?.downloads || []).filter((x) =>
-    ["queued", "resolving", "downloading"].includes(x.status),
+    ["queued", "resolving", "downloading", "tagging"].includes(x.status),
   ).length;
   const resultList = collection ? collectionItems.items : results.items;
   const cardGrid = (items: Item[], max?: number) => (
@@ -839,7 +839,7 @@ export default function App() {
             </button>
           </div>
           <div className="sidebar-foot">
-            SONORA DESKTOP <span>{boot?.version || "1.2.1"}</span>
+            SONORA DESKTOP <span>{boot?.version || "1.2.2"}</span>
           </div>
         </aside>
         <main className="workspace">

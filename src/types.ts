@@ -39,6 +39,7 @@ export type Download = {
     | "queued"
     | "resolving"
     | "downloading"
+    | "tagging"
     | "completed"
     | "failed"
     | "paused"
@@ -50,12 +51,18 @@ export type Download = {
   message: string;
   path?: string;
   actualQuality?: string;
+  metadata?: {
+    status: "written" | "partial" | "failed" | "disabled";
+    warnings: string[];
+    missingFields?: string[];
+  };
   createdAt: number;
 };
 export type Settings = {
   downloadDir: string;
   quality: Quality;
   autoLyrics: boolean;
+  autoMetadata: boolean;
   saveTranslation: boolean;
   lyricFormat: "auto" | "lrc" | "elrc" | "ttml";
   lyricSource: "auto" | "platform" | "amll";

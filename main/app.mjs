@@ -23,9 +23,10 @@ import { PLATFORMS, safeName, httpUrl } from "./core/models.mjs";
 import { joinCookies } from "./providers/engines.mjs";
 import { errorMessage } from "./core/errors.mjs";
 import { exportLyrics, lyricDocument, parseTtml } from "./services/lyrics.mjs";
-import { TagEditor, readTags, imageType } from "./services/tag-editor.mjs";
+import { TagEditor, readTags } from "./services/tag-editor.mjs";
 import { MetadataMatcher } from "./services/metadata-match.mjs";
-import { request } from "./core/transport.mjs";
+import { fetchArtwork, normalizeArtwork } from "./services/artwork.mjs";
+import { DownloadMetadata } from "./services/download-metadata.mjs";
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 app.setName("Sonora");
 if (!app.isPackaged && process.env.SONORA_DATA_DIR)
@@ -321,63 +322,24 @@ if (!app.requestSingleInstanceLock()) {
       metadataMatcher.lyrics(id, options),
     );
     const artwork = async (url) => {
-      let data;
-      if (url) {
-        if (!httpUrl(url)) throw Error("封面地址必须是 HTTP 或 HTTPS");
-        const r = await request(url, { timeout: 16000 });
-        if (!r.ok) {
-          await r.body?.cancel();
-          throw Error(`封面请求 HTTP ${r.status}`);
-        }
-        const parts = [];
-        let size = 0;
-        const reader = r.body.getReader();
-        try {
-          while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
-            size += value.length;
-            if (size > 12 * 1024 * 1024) throw Error("封面不能超过 12 MB");
-            parts.push(value);
-          }
-        } finally {
-          await reader.cancel().catch(() => {});
-        }
-        data = Buffer.concat(parts);
-      } else {
-        const r = await dialog.showOpenDialog(win, {
-          title: "选择歌曲封面",
-          properties: ["openFile"],
-          filters: [
-            {
-              name: "封面图片",
-              extensions: ["jpg", "jpeg", "png", "webp", "gif"],
-            },
-          ],
-        });
-        if (r.canceled) return null;
-        const stat = await fs.promises.stat(r.filePaths[0]);
-        if (stat.size > 12 * 1024 * 1024) throw Error("封面不能超过 12 MB");
-        data = await fs.promises.readFile(r.filePaths[0]);
-      }
-      if (!imageType(data))
-        throw Error("请选择有效的 JPEG、PNG、WebP 或 GIF 图片");
-      let image = nativeImage.createFromBuffer(data);
-      if (image.isEmpty()) throw Error("封面图片无法解码");
-      const size = image.getSize();
-      if (size.width > 16000 || size.height > 16000)
-        throw Error("封面尺寸过大");
-      if (Math.max(size.width, size.height) > 1600)
-        image = image.resize(
-          size.width >= size.height ? { width: 1600 } : { height: 1600 },
-        );
-      const jpeg = imageType(data).ext === "jpg";
-      const buffer = jpeg ? image.toJPEG(92) : image.toPNG();
-      return {
-        dataUrl: `data:image/${jpeg ? "jpeg" : "png"};base64,${buffer.toString("base64")}`,
-        bytes: buffer.length,
-        ...image.getSize(),
-      };
+      if (url) return fetchArtwork(url, nativeImage);
+      const r = await dialog.showOpenDialog(win, {
+        title: "选择歌曲封面",
+        properties: ["openFile"],
+        filters: [
+          {
+            name: "封面图片",
+            extensions: ["jpg", "jpeg", "png", "webp", "gif"],
+          },
+        ],
+      });
+      if (r.canceled) return null;
+      const stat = await fs.promises.stat(r.filePaths[0]);
+      if (stat.size > 12 * 1024 * 1024) throw Error("封面不能超过 12 MB");
+      return normalizeArtwork(
+        await fs.promises.readFile(r.filePaths[0]),
+        nativeImage,
+      );
     };
     bind("tagArtwork", (url) => artwork(url));
     bind("tagMatchCover", async (id) =>
@@ -628,7 +590,11 @@ if (!app.requestSingleInstanceLock()) {
     beforeWrite: (file) => media.suspendFile(file),
   });
   metadataMatcher = new MetadataMatcher(providers, library);
-  downloads = new DownloadManager(store, providers, library);
+  downloads = new DownloadManager(store, providers, library, {
+    metadata: new DownloadMetadata(metadataMatcher, tagEditor, {
+      artwork: (url, options) => fetchArtwork(url, nativeImage, options),
+    }),
+  });
   media = new MediaService({ coverDir: library.coverDir });
   protocol.handle("sonora-media", (request) => media.handle(request));
   win = new BrowserWindow({

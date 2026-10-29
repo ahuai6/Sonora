@@ -17,7 +17,7 @@ const names = (credits) =>
 const quoted = (s) => '"' + String(s).replace(/["\\]/g, " ").trim() + '"';
 const ua = {
   "User-Agent":
-    "Sonora/1.2.1 (music-tag-editor; https://github.com/ahuai6/Sonora)",
+    "Sonora/1.2.2 (music-tag-editor; https://github.com/ahuai6/Sonora)",
 };
 export class MetadataMatcher {
   constructor(providers, library) {
@@ -83,6 +83,17 @@ export class MetadataMatcher {
         throw e;
       });
     return c.detailsPromise;
+  }
+  async forTrack(track) {
+    return this.loadDetails({
+      source: track.platform,
+      track,
+      tags: present({
+        title: track.title,
+        artist: track.artist,
+        album: track.album,
+      }),
+    });
   }
   async loadDetails(c) {
     let tags = { ...c.tags },

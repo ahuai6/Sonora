@@ -5,19 +5,26 @@ import { Readable, Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
-import { safeName, httpUrl } from "../core/models.mjs";
+import { httpUrl } from "../core/models.mjs";
 import { sniffAudio, uniqueCommit } from "./files.mjs";
 export class DownloadManager extends EventEmitter {
-  constructor(store, providers, library) {
+  constructor(store, providers, library, { metadata } = {}) {
     super();
     this.store = store;
     this.providers = providers;
     this.library = library;
+    this.metadata = metadata;
     this.running = new Map();
     this.stopped = false;
     this.jobs = store.data.downloads.map((j) =>
-      ["queued", "resolving", "downloading"].includes(j.status)
-        ? { ...j, status: "paused", message: "上次会话已中断，可重新下载" }
+      ["queued", "resolving", "downloading", "tagging"].includes(j.status)
+        ? j.path && fs.existsSync(j.path)
+          ? {
+              ...j,
+              status: "completed",
+              message: "下载完成 · 上次整理中断，可重新扫描音乐库",
+            }
+          : { ...j, status: "paused", message: "上次会话已中断，可重新下载" }
         : j,
     );
     for (const job of this.jobs) {
@@ -28,9 +35,22 @@ export class DownloadManager extends EventEmitter {
       )
         continue;
       for (const sub of ["", "网易云音乐", "QQ音乐", "酷狗音乐"]) {
-        try {
-          fs.unlinkSync(path.join(job.folder, sub, `.sonora-${job.id}.part`));
-        } catch {}
+        for (const suffix of [
+          "",
+          ".mp3",
+          ".flac",
+          ".m4a",
+          ".aac",
+          ".ogg",
+          ".opus",
+          ".wav",
+        ]) {
+          try {
+            fs.unlinkSync(
+              path.join(job.folder, sub, `.sonora-${job.id}.part${suffix}`),
+            );
+          } catch {}
+        }
       }
     }
     this.persist();
@@ -54,7 +74,9 @@ export class DownloadManager extends EventEmitter {
           (j) =>
             j.track.key === track.key &&
             j.quality === quality &&
-            ["queued", "resolving", "downloading"].includes(j.status),
+            ["queued", "resolving", "downloading", "tagging"].includes(
+              j.status,
+            ),
         )
       )
         continue;
@@ -81,6 +103,8 @@ export class DownloadManager extends EventEmitter {
   action(id, action) {
     const job = this.jobs.find((x) => x.id === id);
     if (!job) throw Error("下载任务不存在");
+    // A committed file is already durable; finish sidecars/library without cancelling it.
+    if (job.status === "tagging" && job.path) return this.publicJobs();
     if (
       action === "retry" &&
       ["failed", "paused", "cancelled"].includes(job.status)
@@ -91,10 +115,13 @@ export class DownloadManager extends EventEmitter {
         received: 0,
         total: 0,
         progress: 0,
+        path: undefined,
+        metadata: undefined,
+        completedAt: undefined,
       });
     } else if (
       action === "pause" &&
-      ["queued", "resolving", "downloading"].includes(job.status)
+      ["queued", "resolving", "downloading", "tagging"].includes(job.status)
     ) {
       job.status = "paused";
       job.message = "已暂停，继续时重新下载";
@@ -105,7 +132,7 @@ export class DownloadManager extends EventEmitter {
       this.running.get(id)?.abort();
     } else if (
       action === "remove" &&
-      !["resolving", "downloading"].includes(job.status)
+      !["resolving", "downloading", "tagging"].includes(job.status)
     ) {
       this.jobs = this.jobs.filter((j) => j.id !== id);
     }
@@ -246,6 +273,44 @@ export class DownloadManager extends EventEmitter {
         duration + 15 < job.track.duration
       )
         throw Error("返回音频短于歌曲时长，可能为试听片段，未保存");
+      const notes = [];
+      job.status = "tagging";
+      job.speed = 0;
+      if (this.metadata && this.store.data.settings.autoMetadata !== false) {
+        job.message = "音频已下载，正在匹配标签与封面";
+        this.publish();
+        try {
+          const result = await this.metadata.prepare(
+            temp,
+            extension,
+            job.track,
+            {
+              signal: controller.signal,
+            },
+          );
+          const raw = temp;
+          temp = result.file;
+          if (raw !== temp) await fs.promises.unlink(raw);
+          job.metadata = result.metadata;
+          notes.push(
+            result.metadata.status === "partial"
+              ? "标签已写入，部分信息未取得"
+              : "标签已写入",
+          );
+        } catch (e) {
+          controller.signal.throwIfAborted();
+          job.metadata = {
+            status: "failed",
+            warnings: [e.message || "标签写入失败"],
+          };
+          notes.push("标签未写入，可在本地音乐中重试");
+        }
+      } else {
+        job.metadata = { status: "disabled", warnings: [] };
+      }
+      controller.signal.throwIfAborted();
+      job.message = "正在保存音频并更新音乐库";
+      this.publish();
       completedFile = await uniqueCommit(
         temp,
         folder,
@@ -254,11 +319,9 @@ export class DownloadManager extends EventEmitter {
       );
       temp = null;
       job.path = completedFile;
-      job.completedAt = Date.now();
       job.progress = 100;
       job.speed = 0;
-      job.status = "completed";
-      job.message = "下载完成";
+      this.persist();
       if (this.store.data.settings.autoLyrics) {
         try {
           const lyric = await this.providers.lyrics(job.track);
@@ -281,14 +344,17 @@ export class DownloadManager extends EventEmitter {
               { encoding: "utf8", flag: "wx" },
             );
         } catch {
-          job.message = "下载完成 · 未取得歌词或歌词文件已存在";
+          notes.push("未取得歌词或歌词文件已存在");
         }
       }
       try {
         await this.library.importFiles([completedFile]);
       } catch {
-        job.message = "下载完成 · 音乐库更新失败，可重新扫描";
+        notes.push("音乐库更新失败，可重新扫描");
       }
+      job.completedAt = Date.now();
+      job.status = "completed";
+      job.message = ["下载完成", ...notes].join(" · ");
     } catch (e) {
       if (
         ["paused", "cancelled", "queued"].includes(job.status) &&
@@ -312,8 +378,10 @@ export class DownloadManager extends EventEmitter {
     for (const [id, control] of this.running) {
       const job = this.jobs.find((x) => x.id === id);
       if (job) {
-        job.status = "paused";
-        job.message = "应用已关闭，可重新下载";
+        job.status = job.path ? "completed" : "paused";
+        job.message = job.path
+          ? "下载完成 · 应用已关闭，可重新扫描音乐库"
+          : "应用已关闭，可重新下载";
       }
       control.abort();
     }

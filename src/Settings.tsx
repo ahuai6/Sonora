@@ -134,6 +134,11 @@ export default function Settings({
         </div>
         {[
           [
+            "autoMetadata",
+            "自动匹配并写入标签",
+            "下载后按原平台歌曲 ID 获取元数据与封面，写入音频后加入本地音乐库",
+          ],
+          [
             "autoLyrics",
             "同时保存歌词",
             "下载成功后，将所选格式的歌词保存到音频旁",
