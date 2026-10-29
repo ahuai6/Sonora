@@ -55,6 +55,7 @@ export type Download = {
     status: "written" | "partial" | "failed" | "disabled";
     warnings: string[];
     missingFields?: string[];
+    lyrics?: "embedded" | "unavailable" | "disabled";
   };
   createdAt: number;
 };

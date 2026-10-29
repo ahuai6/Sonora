@@ -12,6 +12,15 @@ import { TagEditor, readTags } from "../main/services/tag-editor.mjs";
 import { MetadataMatcher } from "../main/services/metadata-match.mjs";
 import { DownloadMetadata } from "../main/services/download-metadata.mjs";
 import { DownloadManager } from "../main/services/downloads.mjs";
+import { lyricDocument } from "../main/services/lyrics.mjs";
+
+const lyric = () =>
+  lyricDocument({
+    original: "[00:00]Original lyric",
+    timed: "[0,1000](0,400,0)Original (400,600,0)lyric",
+    translation: "[00:00]翻译歌词",
+    format: "yrc",
+  });
 
 const artwork =
   "data:image/png;base64," +
@@ -66,6 +75,7 @@ async function wait(fn) {
 async function pipeline(t, options = {}) {
   const ctx = setup(t),
     data = fs.readFileSync("tests/fixtures/tag-tone.flac");
+  if (options.settings) ctx.store.setSettings(options.settings);
   const server = http.createServer((_req, res) => res.end(data));
   server.listen(0, "127.0.0.1");
   await once(server, "listening");
@@ -75,7 +85,10 @@ async function pipeline(t, options = {}) {
     new DownloadMetadata(
       { forTrack: async () => ({ tags, warnings: [] }) },
       ctx.editor,
-      { artwork: async () => ({ dataUrl: artwork }) },
+      {
+        artwork: async () => ({ dataUrl: artwork }),
+        lyrics: options.lyrics || (async () => lyric()),
+      },
     );
   const manager = new DownloadManager(
     ctx.store,
@@ -102,9 +115,18 @@ for (const extension of ["mp3", "flac", "m4a", "ogg", "opus", "wav"]) {
     const metadata = new DownloadMetadata(
       { forTrack: async () => ({ tags, warnings: [] }) },
       editor,
-      { artwork: async () => ({ dataUrl: artwork }) },
+      {
+        artwork: async () => ({ dataUrl: artwork }),
+        lyrics: async () => lyric(),
+      },
     );
-    const result = await metadata.prepare(file, extension, track());
+    const result = await metadata.prepare(file, extension, track(), {
+      settings: {
+        autoLyrics: true,
+        saveTranslation: true,
+        lyricFormat: "auto",
+      },
+    });
     const saved = readTags(result.file);
     assert.deepEqual(saved.tags.title, tags.title);
     for (const key of [
@@ -124,6 +146,9 @@ for (const extension of ["mp3", "flac", "m4a", "ogg", "opus", "wav"]) {
       ),
     );
     assert(fs.readFileSync(file).equals(original));
+    assert.equal(result.metadata.lyrics, "embedded");
+    assert.match(saved.lyrics, /<00:00.400>/);
+    assert.match(saved.lyrics, /\[00:00.000\]翻译歌词/);
     const [before, after] = await Promise.all([
       parseFile(file),
       parseFile(result.file),
@@ -208,6 +233,99 @@ test("bounded metadata timeout uses basic tags and late responses cannot mutate 
   assert(fs.readFileSync(result.file).equals(bytes));
 });
 
+test("embedding lyrics works with metadata matching off and preserves existing tags and artwork", async (t) => {
+  const { dir, editor } = setup(t),
+    seed = path.join(dir, "seed.part");
+  fs.copyFileSync("tests/fixtures/tag-tone.flac", seed);
+  const prepared = await editor.stageDownload(seed, "flac", {
+    tags: { title: "Existing title", composer: "Existing composer" },
+    artwork,
+  });
+  const raw = path.join(dir, "download.part");
+  fs.renameSync(prepared, raw);
+  let matched = false;
+  const metadata = new DownloadMetadata(
+    {
+      forTrack: async () => {
+        matched = true;
+        throw Error("must not match");
+      },
+    },
+    editor,
+    { lyrics: async () => lyric() },
+  );
+  const result = await metadata.prepare(raw, "flac", track(), {
+    settings: { autoMetadata: false, autoLyrics: true },
+  });
+  const saved = readTags(result.file);
+  assert(!matched);
+  assert.equal(saved.tags.title, "Existing title");
+  assert.equal(saved.tags.composer, "Existing composer");
+  assert.equal(saved.pictures.length, 1);
+  assert.match(saved.lyrics, /翻译歌词/);
+  assert.equal(result.metadata.lyrics, "embedded");
+});
+
+test("translation can be excluded from the single embedded lyric tag", async (t) => {
+  const { dir, editor } = setup(t),
+    raw = path.join(dir, "download.part");
+  fs.copyFileSync("tests/fixtures/tag-tone.flac", raw);
+  const metadata = new DownloadMetadata(
+    { forTrack: async () => ({ tags, warnings: [] }) },
+    editor,
+    { lyrics: async () => lyric() },
+  );
+  const result = await metadata.prepare(raw, "flac", track(), {
+    settings: { autoLyrics: true, saveTranslation: false },
+  });
+  const saved = readTags(result.file);
+  assert.match(saved.lyrics, /Original/);
+  assert.doesNotMatch(saved.lyrics, /翻译歌词/);
+  assert.match(saved.lyrics, /<00:00.400>/);
+});
+
+for (const format of ["lrc", "ttml"]) {
+  test(`download embeds selected ${format} text and translation in the audio`, async (t) => {
+    const { dir, editor } = setup(t),
+      raw = path.join(dir, "download.part");
+    fs.copyFileSync("tests/fixtures/tag-tone.flac", raw);
+    const metadata = new DownloadMetadata(
+      { forTrack: async () => ({ tags, warnings: [] }) },
+      editor,
+      { lyrics: async () => lyric() },
+    );
+    const result = await metadata.prepare(raw, "flac", track(), {
+      settings: { autoLyrics: true, lyricFormat: format },
+    });
+    const text = readTags(result.file).lyrics;
+    assert.match(text, /翻译歌词/);
+    if (format === "ttml") assert.match(text, /ttm:role="x-translation"/);
+    else {
+      assert.match(text, /\[00:00.000\]翻译歌词/);
+      assert.doesNotMatch(text, /<00:00/);
+    }
+    assert(!fs.readdirSync(dir).some((name) => /\.(lrc|ttml)$/.test(name)));
+  });
+}
+
+test("lyric API failure still completes the audio download without any external lyric or translation files", async (t) => {
+  const ctx = await pipeline(t, {
+    settings: { autoLyrics: true },
+    lyrics: async () => {
+      throw Error("offline lyric API");
+    },
+  });
+  ctx.manager.add([track()], "high");
+  await wait(() => ctx.manager.jobs[0].status === "completed");
+  const job = ctx.manager.jobs[0];
+  assert.equal(job.metadata.lyrics, "unavailable");
+  assert(job.metadata.warnings.some((w) => w.includes("歌词未内嵌")));
+  assert.equal(readTags(job.path).tags.year, 2020);
+  assert.deepEqual(fs.readdirSync(path.dirname(job.path)), [
+    path.basename(job.path),
+  ]);
+});
+
 test("turning off automatic metadata preserves downloaded bytes and skips the matcher", async (t) => {
   let called = false;
   const ctx = await pipeline(t, {
@@ -237,7 +355,7 @@ test("a tag write failure leaves downloaded audio usable and does not turn the t
   await wait(() => ctx.manager.jobs[0].status === "completed");
   assert(fs.readFileSync(ctx.manager.jobs[0].path).equals(ctx.data));
   assert.equal(ctx.manager.jobs[0].metadata.status, "failed");
-  assert.match(ctx.manager.jobs[0].message, /标签未写入/);
+  assert.match(ctx.manager.jobs[0].message, /内嵌信息未写入/);
   assert.equal(ctx.library.list().length, 1);
 });
 

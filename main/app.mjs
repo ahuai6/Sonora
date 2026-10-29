@@ -593,6 +593,7 @@ if (!app.requestSingleInstanceLock()) {
   downloads = new DownloadManager(store, providers, library, {
     metadata: new DownloadMetadata(metadataMatcher, tagEditor, {
       artwork: (url, options) => fetchArtwork(url, nativeImage, options),
+      lyrics: (track) => providers.lyrics(track),
     }),
   });
   media = new MediaService({ coverDir: library.coverDir });

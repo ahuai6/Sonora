@@ -839,7 +839,7 @@ export default function App() {
             </button>
           </div>
           <div className="sidebar-foot">
-            SONORA DESKTOP <span>{boot?.version || "1.2.2"}</span>
+            SONORA DESKTOP <span>{boot?.version || "1.2.3"}</span>
           </div>
         </aside>
         <main className="workspace">

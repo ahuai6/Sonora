@@ -21,6 +21,8 @@ import {
 import { Store } from "../main/core/store.mjs";
 import { ProviderRegistry } from "../main/providers/registry.mjs";
 import { DownloadManager } from "../main/services/downloads.mjs";
+import { DownloadMetadata } from "../main/services/download-metadata.mjs";
+import { TagEditor, readTags } from "../main/services/tag-editor.mjs";
 import { MediaService } from "../main/services/media.mjs";
 import { EngineBridge, joinCookies } from "../main/providers/engines.mjs";
 const temp = () => fs.mkdtempSync(path.join(os.tmpdir(), "sonora-test-"));
@@ -472,7 +474,7 @@ test("keyword resolver refuses a different recording name", async (t) => {
     /不匹配/,
   );
 });
-test("download pipeline writes verified audio, sidecar lyrics and music metadata", async (t) => {
+test("download pipeline writes verified audio with embedded lyrics and no sidecars", async (t) => {
   const data = wave();
   const { server, url } = await listen((_req, res) => {
     res.writeHead(200, {
@@ -496,7 +498,13 @@ test("download pipeline writes verified audio, sidecar lyrics and music metadata
     }),
     lyrics: async () => ({ original: "[00:00.00]Test", translation: "" }),
   };
-  const manager = new DownloadManager(store, provider, lib);
+  const manager = new DownloadManager(store, provider, lib, {
+    metadata: new DownloadMetadata(
+      { forTrack: async () => ({ tags: {}, warnings: [] }) },
+      new TagEditor(store, lib),
+      { lyrics: provider.lyrics },
+    ),
+  });
   const track = {
     id: "1",
     key: "netease:song:1",
@@ -511,9 +519,13 @@ test("download pipeline writes verified audio, sidecar lyrics and music metadata
   await wait(
     () => manager.jobs[0].status === "completed" && lib.list().length === 1,
   );
-  assert.deepEqual(fs.readFileSync(manager.jobs[0].path), data);
+  const saved = fs.readFileSync(manager.jobs[0].path);
+  assert(saved.includes(data.subarray(44)));
   assert.equal(path.extname(manager.jobs[0].path), ".wav");
-  assert(fs.existsSync(manager.jobs[0].path.replace(".wav", ".lrc")));
+  assert.match(readTags(manager.jobs[0].path).lyrics, /\[00:00.000\]Test/);
+  assert.deepEqual(fs.readdirSync(path.dirname(manager.jobs[0].path)), [
+    path.basename(manager.jobs[0].path),
+  ]);
   assert.equal(lib.list().length, 1);
   assert.equal(Math.round(lib.list()[0].duration), 2);
   manager.add([track], "standard");

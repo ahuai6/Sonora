@@ -1,4 +1,3 @@
-import { exportLyrics } from "./lyrics.mjs";
 import fs from "node:fs";
 import path from "node:path";
 import { Readable, Transform } from "node:stream";
@@ -103,7 +102,7 @@ export class DownloadManager extends EventEmitter {
   action(id, action) {
     const job = this.jobs.find((x) => x.id === id);
     if (!job) throw Error("下载任务不存在");
-    // A committed file is already durable; finish sidecars/library without cancelling it.
+    // A committed file is already durable; finish the library update without cancelling it.
     if (job.status === "tagging" && job.path) return this.publicJobs();
     if (
       action === "retry" &&
@@ -276,8 +275,12 @@ export class DownloadManager extends EventEmitter {
       const notes = [];
       job.status = "tagging";
       job.speed = 0;
-      if (this.metadata && this.store.data.settings.autoMetadata !== false) {
-        job.message = "音频已下载，正在匹配标签与封面";
+      const settings = { ...this.store.data.settings };
+      if (
+        this.metadata &&
+        (settings.autoMetadata !== false || settings.autoLyrics)
+      ) {
+        job.message = "音频已下载，正在写入内嵌信息";
         this.publish();
         try {
           const result = await this.metadata.prepare(
@@ -286,24 +289,24 @@ export class DownloadManager extends EventEmitter {
             job.track,
             {
               signal: controller.signal,
+              settings,
             },
           );
           const raw = temp;
           temp = result.file;
           if (raw !== temp) await fs.promises.unlink(raw);
           job.metadata = result.metadata;
-          notes.push(
-            result.metadata.status === "partial"
-              ? "标签已写入，部分信息未取得"
-              : "标签已写入",
-          );
+          if (settings.autoMetadata !== false) notes.push("标签已写入");
+          if (result.metadata.lyrics === "embedded") notes.push("歌词已内嵌");
+          if (result.metadata.status === "partial")
+            notes.push("部分信息未取得");
         } catch (e) {
           controller.signal.throwIfAborted();
           job.metadata = {
             status: "failed",
             warnings: [e.message || "标签写入失败"],
           };
-          notes.push("标签未写入，可在本地音乐中重试");
+          notes.push("内嵌信息未写入，可在本地音乐中重试");
         }
       } else {
         job.metadata = { status: "disabled", warnings: [] };
@@ -322,31 +325,6 @@ export class DownloadManager extends EventEmitter {
       job.progress = 100;
       job.speed = 0;
       this.persist();
-      if (this.store.data.settings.autoLyrics) {
-        try {
-          const lyric = await this.providers.lyrics(job.track);
-          const exported = exportLyrics(lyric, {
-            format: this.store.data.settings.lyricFormat || "auto",
-            bilingual: this.store.data.settings.saveTranslation,
-          });
-          const lyricPath = completedFile.replace(
-            /\.[^.]+$/,
-            "." + exported.extension,
-          );
-          await fs.promises.writeFile(lyricPath, "\ufeff" + exported.text, {
-            encoding: "utf8",
-            flag: "wx",
-          });
-          if (lyric.translation && this.store.data.settings.saveTranslation)
-            await fs.promises.writeFile(
-              completedFile.replace(/\.[^.]+$/, ".translation.lrc"),
-              "\ufeff" + lyric.translation,
-              { encoding: "utf8", flag: "wx" },
-            );
-        } catch {
-          notes.push("未取得歌词或歌词文件已存在");
-        }
-      }
       try {
         await this.library.importFiles([completedFile]);
       } catch {

@@ -371,6 +371,17 @@ try {
   assert.equal(downloadedTags.genre, "J-Pop");
   assert.equal(downloadedTags.composer, "Fixture Composer");
   assert.equal(downloadedTags.isrc, "TEST26000001");
+  const embedded = await page.evaluate(async () => {
+    const b = await window.sonora.bootstrap();
+    return (await window.sonora.tagRead(b.library[0].id)).lyrics;
+  });
+  assert.equal(state.downloads[0].metadata.lyrics, "embedded");
+  assert.match(embedded, /<00:00.400>/);
+  assert.match(embedded, /\[00:00.000\]Test track/);
+  assert.deepEqual(fs.readdirSync(path.dirname(state.downloads[0].path)), [
+    path.basename(state.downloads[0].path),
+  ]);
+  checks++;
   checks++;
   checks++;
   await page

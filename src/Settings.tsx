@@ -140,13 +140,13 @@ export default function Settings({
           ],
           [
             "autoLyrics",
-            "同时保存歌词",
-            "下载成功后，将所选格式的歌词保存到音频旁",
+            "下载时内嵌歌词",
+            "将所选格式的歌词写入音频，不生成外部歌词文件",
           ],
           [
             "saveTranslation",
-            "保存翻译歌词",
-            "翻译与原文使用相同时间戳，并另存 .translation.lrc",
+            "合并翻译歌词",
+            "将翻译与原文按相同时间戳合并，写入同一内嵌歌词标签",
           ],
           [
             "groupByPlatform",

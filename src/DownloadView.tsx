@@ -17,7 +17,7 @@ const labels: Record<string, string> = {
   queued: "等待中",
   resolving: "获取音源",
   downloading: "下载中",
-  tagging: "匹配标签",
+  tagging: "写入标签",
   completed: "已完成",
   failed: "失败",
   paused: "已暂停",
