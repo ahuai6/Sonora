@@ -1177,10 +1177,9 @@ button:active:not(:disabled) {
 .track-head,
 .track-row {
   display: grid;
-  grid-template-columns: 22px 26px minmax(140px, 1.5fr) minmax(
-      104px,
-      0.9fr
-    ) 62px 42px 64px;
+  grid-template-columns:
+    22px 26px minmax(140px, 1.5fr) minmax(104px, 0.9fr)
+    62px 42px 64px;
   align-items: center;
   column-gap: 11px;
   padding: 0 10px;
@@ -1323,10 +1322,9 @@ button:active:not(:disabled) {
 }
 .track-table.local .track-head,
 .track-table.local .track-row {
-  grid-template-columns: 20px 23px minmax(120px, 1.3fr) minmax(
-      85px,
-      0.8fr
-    ) 65px 36px 116px;
+  grid-template-columns:
+    20px 23px minmax(120px, 1.3fr) minmax(85px, 0.8fr)
+    65px 36px 148px;
   column-gap: 9px;
 }
 .local-format {
@@ -2414,6 +2412,192 @@ button:active:not(:disabled) {
 .modal.wide {
   width: 650px;
 }
+.modal.wide:has(.tag-editor) {
+  width: 960px;
+  max-width: calc(100vw - 70px);
+}
+.tag-editor-layout {
+  display: grid;
+  grid-template-columns: 200px minmax(0, 1fr);
+  gap: 28px;
+}
+.tag-cover-panel {
+  border-right: 1px solid var(--line);
+  padding-right: 23px;
+}
+.tag-cover.artwork {
+  width: 176px;
+  height: 176px;
+  border-radius: 12px;
+  margin-bottom: 14px;
+}
+.tag-cover-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 18px;
+}
+.tag-note {
+  font-size: 11px;
+  line-height: 1.8;
+  color: var(--muted);
+  margin: 10px 0;
+}
+.tag-storage-note {
+  display: flex;
+  gap: 8px;
+  font-size: 11px;
+  line-height: 1.8;
+  padding-top: 18px;
+  margin-top: 20px;
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+}
+.tag-storage-note svg {
+  flex-shrink: 0;
+  margin-top: 3px;
+}
+.tag-tabs {
+  margin-bottom: 20px;
+}
+.tag-fields {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px 16px;
+}
+.tag-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+.tag-field > span {
+  font-size: 11px;
+  color: var(--secondary);
+}
+.tag-field input,
+.tag-field textarea,
+.tag-match form > input,
+.tag-lyrics-editor {
+  width: 100%;
+  min-width: 0;
+  border: 1px solid var(--line);
+  background: var(--input);
+  color: var(--text);
+  border-radius: 7px;
+  padding: 9px 10px;
+  font: inherit;
+  font-size: 12px;
+  outline: none;
+}
+.tag-field input:focus,
+.tag-field textarea:focus,
+.tag-match form > input:focus,
+.tag-lyrics-editor:focus {
+  border-color: var(--accent);
+}
+.tag-span {
+  grid-column: 1 / -1;
+}
+.tag-match form {
+  display: flex;
+  gap: 8px;
+}
+.tag-match form > input {
+  flex: 1;
+}
+.tag-match form select {
+  max-width: 130px;
+}
+.tag-candidates {
+  max-height: 385px;
+  overflow: auto;
+  padding-right: 5px;
+}
+.tag-candidate {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 14px 0;
+  border-bottom: 1px solid var(--line);
+}
+.tag-candidate > .artwork {
+  flex-shrink: 0;
+  margin-top: 3px;
+}
+.tag-candidate-info {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  flex: 1;
+}
+.tag-candidate-info > strong {
+  font-size: 13px;
+}
+.tag-candidate-info > span,
+.tag-candidate-info > small {
+  font-size: 11px;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+.tag-candidate-info .inline-actions {
+  margin-top: 4px;
+  gap: 16px;
+}
+.tag-candidate-info .text-button {
+  font-size: 11px;
+}
+.tag-match-empty {
+  padding: 65px 10px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--muted);
+}
+.tag-errors {
+  font-size: 11px;
+  color: var(--muted);
+  padding: 8px 0;
+  overflow-wrap: anywhere;
+}
+.tag-lyrics-editor {
+  height: 290px;
+  resize: vertical;
+  font-family: Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.8;
+  margin-top: 7px;
+}
+.tag-lyrics-footer {
+  display: flex;
+  justify-content: space-between;
+  gap: 15px;
+  margin-top: 12px;
+}
+.tag-error {
+  font-size: 12px;
+  line-height: 1.7;
+  color: #c54949;
+  background: #c549490b;
+  padding: 12px;
+  margin-top: 16px;
+  border-radius: 7px;
+  overflow-wrap: anywhere;
+}
+.tag-discard {
+  display: flex;
+  gap: 18px;
+  justify-content: flex-end;
+  font-size: 12px;
+  margin-top: 14px;
+  color: var(--muted);
+}
+.tag-footer {
+  justify-content: space-between;
+}
+.track-table.local .row-actions {
+  gap: 2px;
+}
 .modal-heading {
   display: flex;
   justify-content: space-between;
@@ -2679,10 +2863,9 @@ button:active:not(:disabled) {
   }
   .track-head,
   .track-row {
-    grid-template-columns: 17px 21px minmax(110px, 1.5fr) minmax(
-        75px,
-        0.8fr
-      ) 54px 35px 60px;
+    grid-template-columns:
+      17px 21px minmax(110px, 1.5fr) minmax(75px, 0.8fr)
+      54px 35px 60px;
     column-gap: 7px;
     padding: 0 7px;
   }

@@ -7,6 +7,7 @@ import {
   Heart,
   Trash2,
   ListMinus,
+  Tags,
 } from "lucide-react";
 import type { Item } from "./types";
 import { Artwork, PlatformBadge, duration, bytes } from "./ui";
@@ -120,6 +121,14 @@ export default function TrackTable({
           <div className="row-actions">
             {local ? (
               <>
+                <button
+                  className="icon-button"
+                  aria-label={`编辑 ${item.title} 标签`}
+                  title="编辑标签、封面和歌词"
+                  onClick={() => onLocal?.(item.id, "edit")}
+                >
+                  <Tags size={16} />
+                </button>
                 <button
                   className={`icon-button ${item.favorite ? "liked" : ""}`}
                   aria-label="收藏本地歌曲"

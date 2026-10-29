@@ -446,7 +446,7 @@ export default function Settings({
         </div>
         <div>
           <h2>
-            声屿 Sonora <span>1.1.0</span>
+            声屿 Sonora <span>1.2.0</span>
           </h2>
           <p>仅供学习使用，请于下载后24小时自行删除。</p>
           <p>应用不会自动删除已下载文件，请自行管理。</p>

@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { safeName } from "../core/models.mjs";
+import { cacheCover } from "./tag-editor.mjs";
 export const AUDIO_EXTENSIONS = new Set([
   ".mp3",
   ".flac",
@@ -70,6 +71,8 @@ export async function writeUniqueText(folder, name, content) {
 export class MusicLibrary {
   constructor(store) {
     this.store = store;
+    this.coverDir = path.join(store.dir, "covers");
+    this.importQueue = Promise.resolve();
   }
   list() {
     return this.store.data.library;
@@ -90,11 +93,13 @@ export class MusicLibrary {
               "node_modules",
               "$RECYCLE.BIN",
               "System Volume Information",
+              "tag-backups",
             ].includes(item.name)
           )
             await walk(full, depth + 1).catch(() => {});
         } else if (
           item.isFile() &&
+          !item.name.startsWith(".sonora-") &&
           AUDIO_EXTENSIONS.has(path.extname(item.name).toLowerCase())
         )
           found.push(full);
@@ -103,7 +108,14 @@ export class MusicLibrary {
     await walk(folder, 0);
     return this.importFiles(found);
   }
-  async importFiles(files) {
+  async importFiles(files, { force = false } = {}) {
+    const job = this.importQueue
+      .catch(() => {})
+      .then(() => this.importFilesNow(files, { force }));
+    this.importQueue = job;
+    return job;
+  }
+  async importFilesNow(files, { force = false } = {}) {
     const { parseFile } = await import("music-metadata");
     const existing = new Map(
       this.store.data.library.map((x) => [
@@ -120,7 +132,13 @@ export class MusicLibrary {
         const stat = await fs.promises.stat(resolved);
         if (!stat.isFile()) continue;
         const old = existing.get(resolved.toLowerCase());
-        if (old && old.modifiedAt === stat.mtimeMs) continue;
+        if (
+          !force &&
+          old &&
+          old.modifiedAt === stat.mtimeMs &&
+          old.meta?.coverVersion === 1
+        )
+          continue;
         const filename = path.basename(file, path.extname(file));
         const split = filename.includes(" - ") ? filename.split(" - ") : [];
         const guessedArtist = split.length ? split.shift() : "";
@@ -129,7 +147,7 @@ export class MusicLibrary {
         try {
           metadata = await parseFile(resolved, {
             duration: true,
-            skipCovers: true,
+            skipCovers: false,
           });
         } catch {}
         const x = {
@@ -140,7 +158,12 @@ export class MusicLibrary {
           title: metadata?.common.title || guessedTitle,
           artist: metadata?.common.artist || guessedArtist || "",
           album: metadata?.common.album || "",
-          cover: "",
+          cover: await cacheCover(
+            this.coverDir,
+            metadata?.common.picture?.find((p) =>
+              /front/i.test(p.type || ""),
+            ) || metadata?.common.picture?.[0],
+          ),
           duration: metadata?.format.duration || 0,
           path: resolved,
           format: path.extname(file).slice(1).toUpperCase(),
@@ -150,7 +173,12 @@ export class MusicLibrary {
           modifiedAt: stat.mtimeMs,
           addedAt: old?.addedAt || Date.now(),
           favorite: old?.favorite || false,
-          meta: {},
+          meta: {
+            coverVersion: 1,
+            year: metadata?.common.year || 0,
+            genre: metadata?.common.genre || [],
+            hasEmbeddedLyrics: !!metadata?.common.lyrics?.length,
+          },
         };
         existing.set(resolved.toLowerCase(), x);
         imported++;

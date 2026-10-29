@@ -95,6 +95,38 @@ export type Bootstrap = {
   acceptedDisclaimer: boolean;
   platform: string;
 };
+export type MusicTags = Record<string, string | number>;
+export type TagSnapshot = {
+  item: Item;
+  tags: MusicTags;
+  lyrics: string;
+  writable: boolean;
+  warning: string;
+  revision: string;
+  cover: string;
+  backupAvailable: boolean;
+};
+export type TagCandidate = {
+  matchId: string;
+  source: string;
+  sourceName: string;
+  title: string;
+  artist: string;
+  album: string;
+  duration: number;
+  durationDifference: number | null;
+  score?: number;
+  cover: string;
+  releaseId?: string;
+  tags: MusicTags;
+};
+export type TagSaveResult = { items: Item[]; editor: TagSnapshot };
+export type TagArtwork = {
+  dataUrl: string;
+  bytes: number;
+  width: number;
+  height: number;
+};
 export interface API {
   bootstrap(): Promise<Bootstrap>;
   search(q: {
@@ -136,6 +168,36 @@ export interface API {
     failures: unknown[];
   } | null>;
   libraryAction(id: string, action: string): Promise<Item[]>;
+  tagRead(id: string): Promise<TagSnapshot>;
+  tagSave(
+    id: string,
+    patch: {
+      revision: string;
+      tags: MusicTags;
+      lyrics?: string;
+      artwork?: string | null;
+    },
+  ): Promise<TagSaveResult>;
+  tagRestore(id: string, revision: string): Promise<TagSaveResult>;
+  tagSearch(input: {
+    localId: string;
+    query: string;
+    source: string;
+  }): Promise<{
+    items: TagCandidate[];
+    errors: { source: string; message: string }[];
+  }>;
+  tagArtwork(url?: string): Promise<TagArtwork | null>;
+  tagMatchCover(matchId: string): Promise<TagArtwork | null>;
+  tagMatchLyrics(
+    matchId: string,
+    options: { format: string; bilingual: boolean },
+  ): Promise<{
+    text: string;
+    source: string;
+    format: string;
+    hasWordTiming: boolean;
+  }>;
   saveSettings(
     patch: Partial<Settings> & { acceptedDisclaimer?: boolean },
   ): Promise<Settings>;
@@ -167,6 +229,7 @@ export interface API {
   exportDiagnostics(): Promise<string | null>;
   windowAction(action: string): Promise<void>;
   onDownload(cb: (jobs: Download[]) => void): () => void;
+  onLibrary(cb: (items: Item[]) => void): () => void;
 }
 declare global {
   interface Window {

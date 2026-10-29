@@ -66,6 +66,7 @@ import Accounts from "./Accounts";
 import Settings from "./Settings";
 import TrackTable from "./TrackTable";
 import DownloadView from "./DownloadView";
+import TagEditor from "./TagEditor";
 type Page =
   | "discover"
   | "search"
@@ -145,6 +146,7 @@ export default function App() {
     [toasts, setToasts] = useState<
       { id: number; text: string; error: boolean }[]
     >([]);
+  const [tagItem, setTagItem] = useState<Item | null>(null);
   const audio = useRef<HTMLAudioElement>(null),
     searchInput = useRef<HTMLInputElement>(null),
     playGeneration = useRef(0),
@@ -182,7 +184,13 @@ export default function App() {
           .then((r) => setBoot((b) => (b ? { ...b, library: r.library } : b)))
           .catch(() => {});
     });
-    return off;
+    const offLibrary = window.sonora.onLibrary((items) =>
+      setBoot((b) => (b ? { ...b, library: items } : b)),
+    );
+    return () => {
+      off();
+      offLibrary();
+    };
   }, []);
   useEffect(() => {
     if (!boot) return;
@@ -523,6 +531,11 @@ export default function App() {
     }
   }
   async function libraryAction(id: string, action: string) {
+    if (action === "edit") {
+      const item = boot?.library.find((i) => i.id === id);
+      if (item) setTagItem(item);
+      return;
+    }
     try {
       const items = await window.sonora.libraryAction(id, action);
       if (
@@ -826,7 +839,7 @@ export default function App() {
             </button>
           </div>
           <div className="sidebar-foot">
-            SONORA DESKTOP <span>1.1</span>
+            SONORA DESKTOP <span>1.2</span>
           </div>
         </aside>
         <main className="workspace">
@@ -1790,6 +1803,51 @@ export default function App() {
             </>
           )}
         </Modal>
+      )}
+      {tagItem && (
+        <TagEditor
+          key={tagItem.id}
+          item={tagItem}
+          onClose={() => setTagItem(null)}
+          notify={notify}
+          beforeSave={() => {
+            if (currentRef.current?.id === tagItem.id) {
+              playGeneration.current++;
+              audio.current?.pause();
+              audio.current?.removeAttribute("src");
+              audio.current?.load();
+              setPlaying(false);
+            }
+          }}
+          onSaved={(result) => {
+            setBoot((b) => (b ? { ...b, library: result.items } : b));
+            const next = result.editor.item;
+            setTagItem(next);
+            setQueue((q) =>
+              q.map((i) =>
+                i.id === next.id && i.platform === "local" ? next : i,
+              ),
+            );
+            if (
+              currentRef.current?.id === next.id &&
+              currentRef.current?.platform === "local"
+            ) {
+              currentRef.current = next;
+              setCurrent(next);
+              window.sonora
+                .resolve(next, boot?.settings.quality || "high")
+                .then((r) => {
+                  if (currentRef.current?.id === next.id && audio.current)
+                    audio.current.src = r.mediaUrl;
+                })
+                .catch((e) => notify(e.message, true));
+              window.sonora
+                .lyrics(next)
+                .then(setLyric)
+                .catch(() => {});
+            }
+          }}
+        />
       )}
       {welcome && (
         <Modal

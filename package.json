@@ -1,7 +1,7 @@
 {
   "name": "sonora-desktop",
   "productName": "Sonora",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "声屿 · 多平台音乐试听与本地音乐管理",
   "author": "Sonora contributors",
   "license": "MIT",
@@ -24,6 +24,7 @@
     "@xmldom/xmldom": "^0.9.12",
     "kugoumusicapi": "file:vendor/kugou",
     "music-metadata": "^11.16.1",
+    "node-taglib-sharp": "6.0.3",
     "qrcode": "^1.5.4"
   },
   "devDependencies": {

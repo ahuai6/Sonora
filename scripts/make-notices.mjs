@@ -4,6 +4,7 @@ const packages = [
   "@sansenjian/qq-music-api",
   "kugoumusicapi",
   "music-metadata",
+  "node-taglib-sharp",
   "qrcode",
   "@xmldom/xmldom",
   "react",

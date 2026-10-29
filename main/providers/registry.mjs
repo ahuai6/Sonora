@@ -95,6 +95,10 @@ export class ProviderRegistry {
       )
         throw Error("社区歌词源配置不正确");
     }
+    for (const url of Object.values(c.metadataSources || {})) {
+      if (typeof url !== "string" || !httpUrl(url))
+        throw Error("公开元数据库地址不正确");
+    }
   }
   save(c) {
     if (typeof c === "string") c = JSON.parse(c);

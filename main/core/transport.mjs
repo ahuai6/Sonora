@@ -24,7 +24,7 @@ export async function request(
   const res = await fetch(u, {
     method,
     headers: {
-      "User-Agent": "Mozilla/5.0 Sonora/1.1",
+      "User-Agent": "Mozilla/5.0 Sonora/1.2",
       ...headers,
       ...(body ? { "Content-Type": "application/json" } : {}),
     },

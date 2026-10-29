@@ -14,6 +14,13 @@ const methods = [
   "scanLibrary",
   "importMusic",
   "libraryAction",
+  "tagRead",
+  "tagSave",
+  "tagRestore",
+  "tagSearch",
+  "tagArtwork",
+  "tagMatchCover",
+  "tagMatchLyrics",
   "saveSettings",
   "saveAccount",
   "logout",
@@ -38,5 +45,10 @@ api.onDownload = (fn) => {
   const listener = (_e, value) => fn(value);
   ipcRenderer.on("sonora:download", listener);
   return () => ipcRenderer.removeListener("sonora:download", listener);
+};
+api.onLibrary = (fn) => {
+  const listener = (_event, items) => fn(items);
+  ipcRenderer.on("sonora:library", listener);
+  return () => ipcRenderer.removeListener("sonora:library", listener);
 };
 contextBridge.exposeInMainWorld("sonora", Object.freeze(api));

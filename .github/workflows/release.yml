@@ -51,7 +51,10 @@ jobs:
         run: |
           gh release view $env:GITHUB_REF_NAME *> $null
           if ($LASTEXITCODE -ne 0) {
-            gh release create $env:GITHUB_REF_NAME --title "Sonora $env:GITHUB_REF_NAME" --notes-file docs/release-1.1.0.md
+            $version = node -p "require('./package.json').version"
+            $notes = "docs/release-$version.md"
+            if (-not (Test-Path -LiteralPath $notes)) { $notes = 'CHANGELOG.md' }
+            gh release create $env:GITHUB_REF_NAME --title "Sonora $env:GITHUB_REF_NAME" --notes-file $notes
             if ($LASTEXITCODE -ne 0) { throw 'Release creation failed' }
           }
           $files = @(Get-ChildItem -LiteralPath release -Filter 'Sonora-*-Windows-x64.exe' | ForEach-Object FullName)

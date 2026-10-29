@@ -8,6 +8,7 @@ import {
   protocol,
   session,
   Menu,
+  nativeImage,
 } from "electron";
 import fs from "node:fs";
 import path from "node:path";
@@ -21,7 +22,10 @@ import { MediaService } from "./services/media.mjs";
 import { PLATFORMS, safeName, httpUrl } from "./core/models.mjs";
 import { joinCookies } from "./providers/engines.mjs";
 import { errorMessage } from "./core/errors.mjs";
-import { exportLyrics } from "./services/lyrics.mjs";
+import { exportLyrics, lyricDocument, parseTtml } from "./services/lyrics.mjs";
+import { TagEditor, readTags, imageType } from "./services/tag-editor.mjs";
+import { MetadataMatcher } from "./services/metadata-match.mjs";
+import { request } from "./core/transport.mjs";
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 app.setName("Sonora");
 if (!app.isPackaged && process.env.SONORA_DATA_DIR)
@@ -44,7 +48,14 @@ protocol.registerSchemesAsPrivileged([
 if (!app.requestSingleInstanceLock()) {
   app.quit();
 } else {
-  let win, store, providers, library, downloads, media;
+  let win,
+    store,
+    providers,
+    library,
+    downloads,
+    media,
+    tagEditor,
+    metadataMatcher;
   const logins = new Map();
   let shuttingDown = false;
   app.on("second-instance", () => {
@@ -162,12 +173,32 @@ if (!app.requestSingleInstanceLock()) {
     bind("lyrics", async (track) => {
       if (track?.platform === "local") {
         const item = library.known(track.id);
+        let embedded = "";
+        try {
+          embedded = readTags(item.path).lyrics;
+        } catch {}
         const file = item.path.replace(/\.[^.]+$/, ".lrc");
-        return {
-          original: await fs.promises.readFile(file, "utf8").catch(() => ""),
-          translation: "",
-          romanization: "",
-        };
+        const text =
+          embedded ||
+          (await fs.promises.readFile(file, "utf8").catch(() => ""));
+        let doc;
+        if (/<tt[\s>]/.test(text))
+          try {
+            doc = lyricDocument({
+              lines: parseTtml(text),
+              source: "本地内嵌 TTML",
+            });
+          } catch {}
+        doc ||= lyricDocument({
+          original: text,
+          source: embedded ? "本地内嵌歌词" : "本地歌词文件",
+        });
+        if (doc.lines.length)
+          doc.original = exportLyrics(doc, {
+            format: "lrc",
+            bilingual: true,
+          }).text;
+        return doc;
       }
       return providers.lyrics(knownTrack(track));
     });
@@ -263,6 +294,76 @@ if (!app.requestSingleInstanceLock()) {
       }
       throw Error("未知音乐库操作");
     });
+    bind("tagRead", (id) => tagEditor.read(id));
+    bind("tagSave", (id, patch) => tagEditor.save(id, patch));
+    bind("tagRestore", (id, revision) => tagEditor.restore(id, revision));
+    bind("tagSearch", (input) => metadataMatcher.search(input));
+    bind("tagMatchLyrics", (id, options) =>
+      metadataMatcher.lyrics(id, options),
+    );
+    const artwork = async (url) => {
+      let data;
+      if (url) {
+        if (!httpUrl(url)) throw Error("封面地址必须是 HTTP 或 HTTPS");
+        const r = await request(url, { timeout: 16000 });
+        if (!r.ok) {
+          await r.body?.cancel();
+          throw Error(`封面请求 HTTP ${r.status}`);
+        }
+        const parts = [];
+        let size = 0;
+        const reader = r.body.getReader();
+        try {
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            size += value.length;
+            if (size > 12 * 1024 * 1024) throw Error("封面不能超过 12 MB");
+            parts.push(value);
+          }
+        } finally {
+          await reader.cancel().catch(() => {});
+        }
+        data = Buffer.concat(parts);
+      } else {
+        const r = await dialog.showOpenDialog(win, {
+          title: "选择歌曲封面",
+          properties: ["openFile"],
+          filters: [
+            {
+              name: "封面图片",
+              extensions: ["jpg", "jpeg", "png", "webp", "gif"],
+            },
+          ],
+        });
+        if (r.canceled) return null;
+        const stat = await fs.promises.stat(r.filePaths[0]);
+        if (stat.size > 12 * 1024 * 1024) throw Error("封面不能超过 12 MB");
+        data = await fs.promises.readFile(r.filePaths[0]);
+      }
+      if (!imageType(data))
+        throw Error("请选择有效的 JPEG、PNG、WebP 或 GIF 图片");
+      let image = nativeImage.createFromBuffer(data);
+      if (image.isEmpty()) throw Error("封面图片无法解码");
+      const size = image.getSize();
+      if (size.width > 16000 || size.height > 16000)
+        throw Error("封面尺寸过大");
+      if (Math.max(size.width, size.height) > 1600)
+        image = image.resize(
+          size.width >= size.height ? { width: 1600 } : { height: 1600 },
+        );
+      const jpeg = imageType(data).ext === "jpg";
+      const buffer = jpeg ? image.toJPEG(92) : image.toPNG();
+      return {
+        dataUrl: `data:image/${jpeg ? "jpeg" : "png"};base64,${buffer.toString("base64")}`,
+        bytes: buffer.length,
+        ...image.getSize(),
+      };
+    };
+    bind("tagArtwork", (url) => artwork(url));
+    bind("tagMatchCover", async (id) =>
+      artwork(await metadataMatcher.cover(id)),
+    );
     bind("saveSettings", (patch) => {
       if (patch.acceptedDisclaimer !== undefined) {
         store.data.acceptedDisclaimer = !!patch.acceptedDisclaimer;
@@ -504,8 +605,10 @@ if (!app.requestSingleInstanceLock()) {
     path.join(root, "profiles/providers.json"),
   );
   library = new MusicLibrary(store);
+  tagEditor = new TagEditor(store, library);
+  metadataMatcher = new MetadataMatcher(providers, library);
   downloads = new DownloadManager(store, providers, library);
-  media = new MediaService();
+  media = new MediaService({ coverDir: library.coverDir });
   protocol.handle("sonora-media", (request) => media.handle(request));
   win = new BrowserWindow({
     width: 1360,
@@ -541,6 +644,18 @@ if (!app.requestSingleInstanceLock()) {
   if (process.env.SONORA_DEV_URL && !app.isPackaged)
     await win.loadURL(process.env.SONORA_DEV_URL);
   else await win.loadFile(path.join(root, "dist/index.html"));
+  const missingCovers = library
+    .list()
+    .filter((i) => i.meta?.coverVersion !== 1)
+    .map((i) => i.path);
+  if (missingCovers.length)
+    library
+      .importFiles(missingCovers)
+      .then((r) => {
+        if (win && !win.isDestroyed())
+          win.webContents.send("sonora:library", r.items);
+      })
+      .catch(() => {});
   app.on("before-quit", () => {
     if (!shuttingDown) {
       shuttingDown = true;

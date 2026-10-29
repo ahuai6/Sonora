@@ -36,7 +36,7 @@ const song = (p, n = 1) => ({
   id: p + "-song-" + n,
   name: "测试音轨 " + n,
   artist: "Sonora Test",
-  album: { name: "Validation Album" },
+  album: { name: "Validation Album", picUrl: base + "/cover" },
   duration: 2,
 });
 const config = JSON.parse(fs.readFileSync("profiles/providers.json", "utf8"));
@@ -44,6 +44,55 @@ const server = http.createServer((req, res) => {
   const u = new URL(req.url, base || "http://localhost");
   const p = u.searchParams.get("platform") || "netease";
   const op = u.pathname;
+  if (op === "/cover") {
+    res.setHeader("Content-Type", "image/png");
+    res.end(fs.readFileSync("build/icon.png"));
+    return;
+  }
+  if (op === "/mb/recording") {
+    res.setHeader("Content-Type", "application/json");
+    res.end(
+      JSON.stringify({
+        recordings: [
+          {
+            id: "mb-recording",
+            title: "公开数据库匹配",
+            length: 2000,
+            "artist-credit": [{ name: "Public Artist" }],
+            releases: [
+              { id: "mb-release", title: "Public Album", date: "2025-01-01" },
+            ],
+          },
+        ],
+      }),
+    );
+    return;
+  }
+  if (op === "/ca/release/mb-release") {
+    res.setHeader("Content-Type", "application/json");
+    res.end(
+      JSON.stringify({
+        images: [{ front: true, thumbnails: { large: base + "/cover" } }],
+      }),
+    );
+    return;
+  }
+  if (op === "/lr/search") {
+    res.setHeader("Content-Type", "application/json");
+    res.end(
+      JSON.stringify([
+        {
+          id: 1,
+          trackName: "公共歌词",
+          artistName: "Public Artist",
+          albumName: "Public Album",
+          duration: 2,
+          syncedLyrics: "[00:00]LRCLIB fixture lyrics",
+        },
+      ]),
+    );
+    return;
+  }
   if (op === "/audio") {
     let start = 0,
       end = audio.length - 1,
@@ -121,6 +170,11 @@ const server = http.createServer((req, res) => {
 server.listen(0, "127.0.0.1");
 await once(server, "listening");
 base = `http://127.0.0.1:${server.address().port}`;
+config.metadataSources = {
+  musicbrainz: base + "/mb",
+  coverart: base + "/ca",
+  lrclib: base + "/lr",
+};
 for (const p of config.platforms) {
   p.baseUrl = base;
   p.trustRemoteCredentials = false;
@@ -156,8 +210,10 @@ fs.writeFileSync(
 const env = { ...process.env, SONORA_DATA_DIR: profile };
 delete env.ELECTRON_RUN_AS_NODE;
 const app = await electron.launch({
-  executablePath: electronPath,
-  args: ["."],
+  executablePath: process.env.SONORA_TEST_EXECUTABLE || electronPath,
+  args: process.env.SONORA_TEST_EXECUTABLE
+    ? [`--user-data-dir=${profile}`]
+    : ["."],
   env,
 });
 const errors = [];
@@ -290,6 +346,97 @@ try {
   await expect(page.locator(".track-row")).toHaveCount(1);
   assert(fs.existsSync(fixture));
   checks++;
+  await page.getByRole("button", { name: /^编辑 .* 标签$/ }).click();
+  const editor = page.getByRole("dialog", { name: "编辑音乐标签" });
+  await expect(editor.getByLabel("标签曲名", { exact: true })).toBeVisible();
+  await editor.getByLabel("标签曲名", { exact: true }).fill("本地标签已修改");
+  await editor.getByLabel("标签专辑", { exact: true }).fill("手动专辑");
+  await editor.getByRole("button", { name: "在线匹配", exact: true }).click();
+  for (const source of ["netease", "qq", "kugou", "musicbrainz", "lrclib"]) {
+    await editor
+      .getByLabel("标签匹配来源", { exact: true })
+      .selectOption(source);
+    await editor.getByRole("button", { name: "搜索", exact: true }).click();
+    await expect(editor.locator(".tag-candidate").first()).toBeVisible();
+    await expect(editor.locator(".tag-candidate").first()).toContainText(
+      {
+        netease: "网易云",
+        qq: "QQ 音乐",
+        kugou: "酷狗",
+        musicbrainz: "MusicBrainz",
+        lrclib: "LRCLIB",
+      }[source],
+    );
+    if (source === "musicbrainz")
+      await editor
+        .getByRole("button", { name: "采用封面", exact: true })
+        .first()
+        .click();
+  }
+  await editor
+    .getByRole("button", { name: "获取歌词", exact: true })
+    .first()
+    .click();
+  await expect(
+    editor.getByLabel("内嵌歌词内容", { exact: true }),
+  ).toContainText("LRCLIB fixture lyrics");
+  await editor
+    .getByLabel("内嵌歌词内容", { exact: true })
+    .fill("[00:00.000]手动修改后的内嵌歌词");
+  await editor.getByRole("button", { name: "在线匹配", exact: true }).click();
+  await editor
+    .getByLabel("标签匹配来源", { exact: true })
+    .selectOption("netease");
+  await editor.getByRole("button", { name: "搜索", exact: true }).click();
+  await expect(editor.locator(".tag-candidate").first()).toContainText(
+    "网易云",
+  );
+  await editor
+    .getByRole("button", { name: "获取歌词", exact: true })
+    .first()
+    .click();
+  await expect(
+    editor.getByLabel("内嵌歌词内容", { exact: true }),
+  ).toContainText("Test track");
+  await editor
+    .getByLabel("内嵌歌词内容", { exact: true })
+    .fill("[00:00.000]手动修改后的内嵌歌词");
+  await page.screenshot({ path: "test-artifacts/tag-editor.png" });
+  await editor.getByRole("button", { name: "保存到文件", exact: true }).click();
+  await expect(
+    editor.getByRole("button", { name: "保存到文件", exact: true }),
+  ).toBeDisabled();
+  await expect
+    .poll(() =>
+      page.evaluate(async () => {
+        const s = await window.sonora.bootstrap();
+        return s.library[0].title;
+      }),
+    )
+    .toBe("本地标签已修改");
+  const rawTags = await page.evaluate(async () => {
+    const s = await window.sonora.bootstrap();
+    return (await window.sonora.tagRead(s.library[0].id)).tags;
+  });
+  assert.equal(rawTags.artist, "");
+  await editor.getByRole("button", { name: "关闭", exact: true }).click();
+  await expect(page.locator(".track-row .artwork img")).toHaveCount(1);
+  await expect
+    .poll(() =>
+      page
+        .locator(".track-row .artwork img")
+        .evaluate((img) => img.complete && img.naturalWidth > 0),
+    )
+    .toBe(true);
+  await page
+    .getByRole("button", { name: "编辑 本地标签已修改 标签", exact: true })
+    .click();
+  await editor.getByRole("button", { name: "内嵌歌词", exact: true }).click();
+  await expect(editor.getByLabel("内嵌歌词内容", { exact: true })).toHaveValue(
+    "[00:00.000]手动修改后的内嵌歌词",
+  );
+  await editor.getByRole("button", { name: "关闭", exact: true }).click();
+  checks += 6;
   await page.getByRole("button", { name: "偏好与音源", exact: true }).click();
   await page.getByLabel("使用的音源", { exact: true }).selectOption("builtin");
   await expect

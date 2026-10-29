@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { Music2, Loader2, X, ChevronRight } from "lucide-react";
 import type { Item } from "./types";
 export const platformNames: Record<string, string> = {
@@ -43,6 +43,7 @@ export function Artwork({
   className?: string;
 }) {
   const [failed, setFailed] = useState(false);
+  useEffect(() => setFailed(false), [item.cover]);
   const color = [...item.title].reduce((a, c) => a + c.charCodeAt(0), 0) % 6;
   return (
     <div className={`artwork color-${color} ${size} ${className}`}>

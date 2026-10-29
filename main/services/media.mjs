@@ -1,9 +1,11 @@
 import fs from "node:fs";
 import { Readable } from "node:stream";
 import { randomUUID } from "node:crypto";
+import path from "node:path";
 export class MediaService {
-  constructor() {
+  constructor({ coverDir } = {}) {
     this.entries = new Map();
+    this.coverDir = coverDir;
   }
   register(source) {
     const id = randomUUID();
@@ -15,7 +17,31 @@ export class MediaService {
     return `sonora-media://audio/${id}`;
   }
   async handle(req) {
-    const id = new URL(req.url).pathname.slice(1);
+    const target = new URL(req.url);
+    if (target.hostname === "cover") {
+      const name = target.pathname.slice(1);
+      if (!this.coverDir || !/^[a-f0-9]{64}\.(jpg|png|webp|gif)$/.test(name))
+        return new Response(null, { status: 404 });
+      try {
+        return new Response(
+          await fs.promises.readFile(path.join(this.coverDir, name)),
+          {
+            headers: {
+              "Content-Type": {
+                jpg: "image/jpeg",
+                png: "image/png",
+                webp: "image/webp",
+                gif: "image/gif",
+              }[name.split(".").pop()],
+              "Cache-Control": "public, max-age=31536000, immutable",
+            },
+          },
+        );
+      } catch {
+        return new Response(null, { status: 404 });
+      }
+    }
+    const id = target.pathname.slice(1);
     const item = this.entries.get(id);
     if (!item) return new Response("Media not found", { status: 404 });
     const range = req.headers.get("Range");
