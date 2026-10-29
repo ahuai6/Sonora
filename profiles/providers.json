@@ -1,0 +1,534 @@
+{
+  "schemaVersion": 1,
+  "platforms": [
+    {
+      "id": "netease",
+      "name": "网易云音乐",
+      "enabled": true,
+      "engine": "netease",
+      "baseUrl": "",
+      "trustRemoteCredentials": false,
+      "searchTypes": {
+        "song": 1,
+        "artist": 100,
+        "album": 10,
+        "playlist": 1000,
+        "lyric": 1006
+      },
+      "routes": {
+        "search": {
+          "module": "cloudsearch",
+          "path": "/cloudsearch",
+          "params": {
+            "keywords": "{query}",
+            "type": "{type}",
+            "limit": "{limit}",
+            "offset": "{offset}"
+          },
+          "items": [
+            "result.songs",
+            "result.artists",
+            "result.albums",
+            "result.playlists"
+          ]
+        },
+        "charts": {
+          "module": "toplist_detail",
+          "path": "/toplist/detail",
+          "items": ["list"]
+        },
+        "recommend": {
+          "module": "personalized",
+          "path": "/personalized",
+          "params": {
+            "limit": 20
+          },
+          "items": ["result"]
+        },
+        "playlist": {
+          "module": "playlist_track_all",
+          "path": "/playlist/track/all",
+          "params": {
+            "id": "{id}",
+            "limit": "{limit}",
+            "offset": "{offset}"
+          },
+          "items": ["songs"]
+        },
+        "chart": {
+          "module": "playlist_track_all",
+          "path": "/playlist/track/all",
+          "params": {
+            "id": "{id}",
+            "limit": "{limit}",
+            "offset": "{offset}"
+          },
+          "items": ["songs"]
+        },
+        "album": {
+          "module": "album",
+          "path": "/album",
+          "params": {
+            "id": "{id}"
+          },
+          "items": ["songs"]
+        },
+        "artist": {
+          "module": "artist_songs",
+          "path": "/artist/songs",
+          "params": {
+            "id": "{id}",
+            "limit": "{limit}",
+            "offset": "{offset}",
+            "order": "hot"
+          },
+          "items": ["songs"]
+        },
+        "userPlaylists": {
+          "module": "user_playlist",
+          "path": "/user/playlist",
+          "params": {
+            "uid": "{uid}",
+            "limit": "{limit}",
+            "offset": "{offset}"
+          },
+          "items": ["playlist"]
+        },
+        "lyrics": {
+          "module": "lyric",
+          "path": "/lyric",
+          "params": {
+            "id": "{id}"
+          }
+        },
+        "resolve": {
+          "module": "song_url_v1",
+          "path": "/song/url/v1",
+          "params": {
+            "id": "{id}",
+            "level": "{level}"
+          }
+        },
+        "download": {
+          "module": "song_download_url",
+          "path": "/song/download/url",
+          "params": {
+            "id": "{id}",
+            "br": "{br}"
+          }
+        },
+        "lyricsWord": {
+          "module": "lyric_new",
+          "path": "/lyric/new",
+          "params": {
+            "id": "{id}"
+          }
+        }
+      }
+    },
+    {
+      "id": "qq",
+      "name": "QQ 音乐",
+      "enabled": true,
+      "engine": "qq",
+      "baseUrl": "",
+      "trustRemoteCredentials": false,
+      "searchTypes": {
+        "song": 0,
+        "artist": 1,
+        "album": 2,
+        "playlist": 3,
+        "lyric": 7
+      },
+      "routes": {
+        "search": {
+          "module": "getSearchByKey",
+          "path": "/getSearchByKey",
+          "params": {
+            "key": "{query}",
+            "t": "{type}",
+            "limit": "{limit}",
+            "n": "{limit}",
+            "page": "{page}",
+            "p": "{page}"
+          },
+          "gateway": {
+            "module": "music.search.SearchCgiService",
+            "method": "DoSearchForQQMusicDesktop",
+            "param": {
+              "query": "{query}",
+              "search_type": "{type}",
+              "num_per_page": "{limit}",
+              "page_num": "{page}"
+            }
+          },
+          "items": [
+            "body.song.list",
+            "body.singer.list",
+            "body.album.list",
+            "body.songlist.list",
+            "body.lyric.list",
+            "data.song.list",
+            "data.singer.list",
+            "data.album.list",
+            "data.songlist.list",
+            "data.lyric.list",
+            "song.list",
+            "singer.list",
+            "album.list",
+            "songlist.list",
+            "lyric.list"
+          ],
+          "fallbacks": [
+            {
+              "kinds": ["song", "lyric", "artist", "album"],
+              "module": "getSearchByKey",
+              "path": "/getSearchByKey",
+              "params": {
+                "key": "{query}",
+                "t": 0,
+                "n": "{limit}",
+                "p": "{page}"
+              },
+              "items": ["data.song.list"],
+              "deriveRelated": true
+            }
+          ]
+        },
+        "charts": {
+          "module": "getTopLists",
+          "path": "/getRanks",
+          "gateway": {
+            "module": "musicToplist.ToplistInfoServer",
+            "method": "GetAll",
+            "param": {}
+          },
+          "items": ["group", "data.topList"]
+        },
+        "recommend": {
+          "module": "songLists",
+          "path": "/getSongLists",
+          "params": {
+            "categoryId": 10000000,
+            "sortId": 5,
+            "sin": 0,
+            "ein": 19
+          },
+          "items": ["data.list"]
+        },
+        "playlist": {
+          "module": "songListDetail",
+          "path": "/getSongListDetail",
+          "params": {
+            "disstid": "{id}"
+          },
+          "gateway": {
+            "module": "music.srfDissInfo.aiDissInfo",
+            "method": "uniform_get_Dissinfo",
+            "param": {
+              "disstid": "{numericId}",
+              "song_begin": "{offset}",
+              "song_num": "{limit}",
+              "tag": true,
+              "userinfo": true
+            }
+          },
+          "items": ["songlist", "cdlist.0.songlist"]
+        },
+        "chart": {
+          "module": "UCommon",
+          "path": "/getRanks",
+          "gateway": {
+            "module": "musicToplist.ToplistInfoServer",
+            "method": "GetDetail",
+            "param": {
+              "topid": "{numericId}",
+              "num": "{limit}",
+              "offset": "{offset}"
+            }
+          },
+          "items": ["songInfoList", "data.songInfoList"]
+        },
+        "album": {
+          "module": "getAlbumInfo",
+          "path": "/getAlbumInfo",
+          "params": {
+            "albummid": "{id}"
+          },
+          "items": ["data.list", "data.songlist", "data.songList"]
+        },
+        "artist": {
+          "module": "UCommon",
+          "path": "/getSingerHotSongs",
+          "gateway": {
+            "module": "music.musichallSong.SongListGetSingerSong",
+            "method": "GetSingerSongList",
+            "param": {
+              "singerMid": "{id}",
+              "begin": "{offset}",
+              "num": "{limit}",
+              "order": 1
+            }
+          },
+          "items": ["songList", "data.songList"],
+          "fallbacks": [
+            {
+              "module": "getSearchByKey",
+              "path": "/getSearchByKey",
+              "params": {
+                "key": "{query}",
+                "t": 0,
+                "n": "{limit}",
+                "p": "{page}"
+              },
+              "items": ["data.song.list"],
+              "derived": true
+            }
+          ]
+        },
+        "userPlaylists": {
+          "module": "getUserPlaylists",
+          "path": "/user/getUserPlaylists",
+          "flat": true,
+          "params": {
+            "uin": "{uid}",
+            "limit": "{limit}",
+            "offset": "{offset}"
+          },
+          "items": ["playlists", "data.playlists", "data.list", "list"]
+        },
+        "lyrics": {
+          "module": "getLyric",
+          "path": "/getLyric",
+          "params": {
+            "songmid": "{id}",
+            "isFormat": false
+          }
+        },
+        "resolve": {
+          "module": "getMusicPlay",
+          "path": "/getMusicPlay",
+          "params": {
+            "songmid": "{id}",
+            "quality": "{qqQuality}",
+            "mediaId": "{mediaId}"
+          }
+        },
+        "download": {
+          "module": "getMusicPlay",
+          "path": "/getMusicPlay",
+          "params": {
+            "songmid": "{id}",
+            "quality": "{qqQuality}",
+            "mediaId": "{mediaId}"
+          }
+        }
+      }
+    },
+    {
+      "id": "kugou",
+      "name": "酷狗音乐",
+      "enabled": true,
+      "engine": "kugou",
+      "baseUrl": "",
+      "trustRemoteCredentials": false,
+      "searchTypes": {
+        "song": "song",
+        "artist": "author",
+        "album": "album",
+        "playlist": "special",
+        "lyric": "song"
+      },
+      "routes": {
+        "search": {
+          "module": "search",
+          "path": "/search",
+          "params": {
+            "keywords": "{query}",
+            "type": "{type}",
+            "page": "{page}",
+            "pagesize": "{limit}"
+          },
+          "items": ["data.lists", "data.info", "data.list"]
+        },
+        "charts": {
+          "module": "rank_list",
+          "path": "/rank/list",
+          "items": ["data.info", "data.list"]
+        },
+        "recommend": {
+          "module": "top_playlist",
+          "path": "/top/playlist",
+          "params": {
+            "page": 1,
+            "pagesize": 20
+          },
+          "items": ["data.special_list", "data.info", "data.list"]
+        },
+        "playlist": {
+          "module": "playlist_track_all",
+          "path": "/playlist/track/all",
+          "params": {
+            "id": "{id}",
+            "page": "{page}",
+            "pagesize": "{limit}"
+          },
+          "items": ["data.songs", "data.info", "data.list"]
+        },
+        "chart": {
+          "module": "rank_audio",
+          "path": "/rank/audio",
+          "params": {
+            "rankid": "{id}",
+            "page": "{page}",
+            "pagesize": "{limit}"
+          },
+          "items": [
+            "data.songlist",
+            "data.songs",
+            "data.audio_info",
+            "data.info",
+            "data.list"
+          ]
+        },
+        "album": {
+          "module": "album_songs",
+          "path": "/album/songs",
+          "params": {
+            "id": "{id}",
+            "page": "{page}",
+            "pagesize": "{limit}"
+          },
+          "items": ["data.songs", "data.info", "data.list"]
+        },
+        "artist": {
+          "module": "artist_audios",
+          "path": "/artist/audios",
+          "params": {
+            "id": "{id}",
+            "page": "{page}",
+            "pagesize": "{limit}",
+            "sort": "hot"
+          },
+          "items": ["data.songs", "data.info", "data.list", "data"]
+        },
+        "userPlaylists": {
+          "module": "user_playlist",
+          "path": "/user/playlist",
+          "params": {
+            "userid": "{uid}",
+            "page": "{page}",
+            "pagesize": "{limit}"
+          },
+          "items": ["data.info", "data.list"]
+        },
+        "lyrics": {
+          "module": "search_lyric",
+          "path": "/search/lyric",
+          "params": {
+            "hash": "{id}",
+            "keywords": "{query}",
+            "duration": "{duration}",
+            "man": "yes"
+          }
+        },
+        "resolve": {
+          "module": "song_url",
+          "path": "/song/url",
+          "params": {
+            "hash": "{id}",
+            "album_id": "{albumId}",
+            "album_audio_id": "{albumAudioId}",
+            "quality": "{kgQuality}",
+            "free_part": "{freePart}"
+          }
+        },
+        "download": {
+          "module": "song_url",
+          "path": "/song/url",
+          "params": {
+            "hash": "{id}",
+            "album_id": "{albumId}",
+            "album_audio_id": "{albumAudioId}",
+            "quality": "{kgQuality}",
+            "free_part": 0
+          }
+        }
+      }
+    }
+  ],
+  "resolvers": [
+    {
+      "id": "injahow",
+      "name": "Injahow Meting",
+      "enabled": true,
+      "platforms": ["netease"],
+      "mode": "redirect",
+      "url": "https://api.injahow.cn/meting/",
+      "params": {
+        "server": "{metingPlatform}",
+        "type": "url",
+        "id": "{id}",
+        "br": "{kbps}"
+      }
+    },
+    {
+      "id": "mxin",
+      "name": "铭心音乐",
+      "enabled": true,
+      "platforms": ["netease", "qq", "kugou"],
+      "mode": "json",
+      "url": "https://api.mxin.me/api/v1/music",
+      "params": {
+        "server": "{metingPlatform}",
+        "type": "url",
+        "id": "{id}",
+        "bitrate": "{kbps}"
+      },
+      "urlPaths": ["data.result.url", "data.url"],
+      "sizePaths": ["data.result.size"],
+      "bitratePaths": ["data.result.br"]
+    },
+    {
+      "id": "sakurink",
+      "name": "Sakurink Meting",
+      "enabled": true,
+      "platforms": ["netease", "qq", "kugou"],
+      "mode": "redirect",
+      "url": "https://apivc-meting.sakurink.eu.org/registration/",
+      "params": {
+        "server": "{metingPlatform}",
+        "type": "url",
+        "id": "{id}",
+        "br": "{kbps}"
+      }
+    },
+    {
+      "id": "xiaoqq",
+      "name": "慕名 QQ",
+      "enabled": false,
+      "platforms": ["qq"],
+      "mode": "json",
+      "url": "https://xiaoapi.cn/v1/yy_sq.php",
+      "params": {
+        "msg": "{query}",
+        "n": 1
+      },
+      "urlPaths": ["url"],
+      "titlePaths": ["name"],
+      "artistPaths": ["singer"],
+      "strictMatch": true
+    }
+  ],
+  "lyricSources": [
+    {
+      "id": "amll",
+      "url": "https://raw.githubusercontent.com/amll-dev/amll-ttml-db/refs/heads/main/{directory}/{id}.ttml",
+      "directories": {
+        "netease": "ncm-lyrics",
+        "qq": "qq-lyrics"
+      },
+      "timeout": 5000
+    }
+  ]
+}

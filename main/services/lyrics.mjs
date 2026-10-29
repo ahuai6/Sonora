@@ -1,0 +1,240 @@
+import { DOMParser } from "@xmldom/xmldom";
+
+const stamp = (ms) => {
+  const n = Math.max(0, Math.round(ms));
+  return `${String(Math.floor(n / 60000)).padStart(2, "0")}:${String(Math.floor(n / 1000) % 60).padStart(2, "0")}.${String(n % 1000).padStart(3, "0")}`;
+};
+const xml = (s) =>
+  String(s ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;");
+export function parseLrc(text = "") {
+  const offset = Number(String(text).match(/\[offset:([+-]?\d+)\]/i)?.[1] || 0);
+  return String(text)
+    .split(/\r?\n/)
+    .flatMap((row) => {
+      const tags = [...row.matchAll(/\[(\d+):(\d+(?:\.\d+)?)\]/g)];
+      const body = row.replace(/\[[^\]]*\]/g, "").trim();
+      return tags.map((m) => ({
+        start: Math.max(0, (+m[1] * 60 + +m[2]) * 1000 + offset),
+        text: body.replace(/<\d+:\d+(?:\.\d+)?>/g, ""),
+        words: [],
+      }));
+    })
+    .filter((x) => x.text)
+    .sort((a, b) => a.start - b.start);
+}
+export function parseTimed(text = "", format = "yrc") {
+  return String(text)
+    .split(/\r?\n/)
+    .flatMap((row) => {
+      const m = row.match(/^\[(\d+),(\d+)\](.*)$/);
+      if (!m) return [];
+      const start = +m[1],
+        end = start + +m[2],
+        words = [];
+      const re =
+        format === "krc"
+          ? /<(\d+),(\d+),\d+>([^<]*)/g
+          : format === "qrc"
+            ? /(.*?)\((\d+),(\d+)\)/g
+            : /\((\d+),(\d+),\d+\)([^()]*)/g;
+      for (const w of m[3].matchAll(re)) {
+        const t = format === "qrc" ? w[1] : w[3],
+          s =
+            (format === "krc" ? start : 0) + +(format === "qrc" ? w[2] : w[1]),
+          d = +(format === "qrc" ? w[3] : w[2]);
+        words.push({ start: s, end: s + d, text: t });
+      }
+      return [
+        {
+          start,
+          end,
+          words,
+          text: words.length ? words.map((w) => w.text).join("") : m[3],
+        },
+      ];
+    });
+}
+function time(s) {
+  if (!s) return NaN;
+  if (/^\d+(?:\.\d+)?ms$/.test(s)) return parseFloat(s);
+  if (/^\d+(?:\.\d+)?s$/.test(s)) return parseFloat(s) * 1000;
+  return s.split(":").reduce((a, x) => a * 60 + Number(x), 0) * 1000;
+}
+export function parseTtml(text) {
+  if (/<!DOCTYPE|<!ENTITY/i.test(text))
+    throw Error("歌词 XML 包含不支持的实体");
+  const doc = new DOMParser().parseFromString(text, "application/xml");
+  return Array.from(doc.getElementsByTagName("p"))
+    .map((p) => {
+      const words = [];
+      let translation = "",
+        romanization = "",
+        body = "";
+      function visit(n) {
+        if (n.nodeType === 3) {
+          body += n.nodeValue;
+          return;
+        }
+        if (n.nodeType !== 1) return;
+        const role = n.getAttribute("ttm:role");
+        if (role === "x-translation") {
+          translation += n.textContent || "";
+          return;
+        }
+        if (role === "x-roman") {
+          romanization += n.textContent || "";
+          return;
+        }
+        const start = time(n.getAttribute("begin")),
+          end = time(n.getAttribute("end"));
+        if (Number.isFinite(start) && Number.isFinite(end)) {
+          words.push({ start, end, text: n.textContent || "" });
+          body += n.textContent || "";
+          return;
+        }
+        Array.from(n.childNodes).forEach(visit);
+      }
+      Array.from(p.childNodes).forEach(visit);
+      return {
+        start: time(p.getAttribute("begin")),
+        end: time(p.getAttribute("end")),
+        text: body.trim(),
+        words,
+        translation,
+        romanization,
+      };
+    })
+    .filter((x) => Number.isFinite(x.start) && x.text);
+}
+export function alignTranslation(lines, translated) {
+  const rows = parseLrc(translated),
+    used = new Set();
+  for (const line of lines) {
+    if (line.translation) continue;
+    let best = -1,
+      delta = 1201;
+    rows.forEach((r, i) => {
+      const d = Math.abs(r.start - line.start);
+      if (!used.has(i) && d < delta) {
+        best = i;
+        delta = d;
+      }
+    });
+    if (best >= 0) {
+      line.translation = rows[best].text;
+      used.add(best);
+    }
+  }
+  return lines;
+}
+export function lyricDocument({
+  original = "",
+  translation = "",
+  romanization = "",
+  timed = "",
+  format = "yrc",
+  lines,
+  source = "平台歌词",
+}) {
+  lines = lines?.length
+    ? lines
+    : timed
+      ? parseTimed(timed, format)
+      : parseLrc(original);
+  alignTranslation(lines, translation);
+  if (romanization) {
+    const r = alignTranslation(
+      lines.map((l) => ({ ...l, translation: "" })),
+      romanization,
+    );
+    lines.forEach((l, i) => (l.romanization ||= r[i].translation));
+  }
+  const hasWordTiming = lines.some((l) => l.words?.length > 0);
+  const doc = {
+    lines,
+    hasWordTiming,
+    source,
+    original,
+    translation,
+    romanization,
+  };
+  if (lines.length) {
+    doc.original =
+      original && !timed && !hasWordTiming
+        ? original
+        : exportLyrics(doc, { format: "lrc", bilingual: false }).text;
+    doc.translation = lines
+      .filter((l) => l.translation)
+      .map((l) => `[${stamp(l.start)}]${l.translation}`)
+      .join("\n");
+  }
+  return doc;
+}
+export function exportLyrics(doc, options = {}) {
+  if (typeof options === "string")
+    options = { kind: options, format: "lrc", bilingual: false };
+  const { kind = "original", bilingual = true } = options;
+  if (kind !== "original") {
+    if (!["translation", "romanization"].includes(kind) || !doc[kind])
+      throw Error("没有该版本的歌词");
+    return { extension: "lrc", text: doc[kind], label: "LRC 歌词" };
+  }
+  let format = options.format || "lrc";
+  if (format === "auto") format = doc.hasWordTiming ? "elrc" : "lrc";
+  if (!["lrc", "elrc", "ttml"].includes(format))
+    throw Error("不支持的歌词格式");
+  if (format === "elrc" && !doc.hasWordTiming)
+    throw Error("当前歌词没有真实逐字时间，无法导出逐字格式");
+  const lines = doc.lines || parseLrc(doc.original);
+  if (!lines.length) {
+    if (!doc.original) throw Error("没有可用歌词");
+    return { extension: "lrc", text: doc.original, label: "LRC 歌词" };
+  }
+  if (format === "ttml") {
+    const t = (ms) => {
+      const n = Math.max(0, Math.round(ms));
+      return `${String(Math.floor(n / 3600000)).padStart(2, "0")}:${stamp(n % 3600000)}`;
+    };
+    const ps = lines
+      .map((l, i) => {
+        const end = l.end || lines[i + 1]?.start || l.start + 5000;
+        const content = l.words?.length
+          ? l.words
+              .map(
+                (w) =>
+                  `<span begin="${t(w.start)}" end="${t(w.end)}">${xml(w.text)}</span>`,
+              )
+              .join("")
+          : xml(l.text);
+        return `<p begin="${t(l.start)}" end="${t(end)}">${content}${bilingual && l.translation ? `<span ttm:role="x-translation" xml:lang="zh">${xml(l.translation)}</span>` : ""}</p>`;
+      })
+      .join("\n");
+    return {
+      extension: "ttml",
+      label: "TTML 歌词",
+      text: `<?xml version="1.0" encoding="UTF-8"?>\n<tt xmlns="http://www.w3.org/ns/ttml" xmlns:ttm="http://www.w3.org/ns/ttml#metadata"><body><div>\n${ps}\n</div></body></tt>\n`,
+    };
+  }
+  const output = [];
+  for (const l of lines) {
+    const s = `[${stamp(l.start)}]`;
+    const content =
+      format === "elrc" && l.words?.length
+        ? l.words
+            .map((w) => `<${stamp(w.start)}>${w.text}<${stamp(w.end)}>`)
+            .join("")
+            .replace(/<([^>]+)><\1>/g, "<$1>")
+        : l.text;
+    output.push(s + content);
+    if (bilingual && l.translation) output.push(s + l.translation);
+  }
+  return {
+    extension: "lrc",
+    label: format === "elrc" ? "逐字 LRC 歌词" : "LRC 歌词",
+    text: output.join("\r\n") + "\r\n",
+  };
+}

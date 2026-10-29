@@ -1,0 +1,72 @@
+{
+  "name": "sonora-desktop",
+  "productName": "Sonora",
+  "version": "1.1.0",
+  "description": "声屿 · 多平台音乐试听与本地音乐管理",
+  "author": "Sonora contributors",
+  "license": "MIT",
+  "private": true,
+  "type": "module",
+  "main": "main/main.cjs",
+  "scripts": {
+    "dev": "node scripts/dev.mjs",
+    "build": "tsc --noEmit && vite build",
+    "start": "electron .",
+    "test": "node --test tests/*.test.mjs",
+    "test:live": "node scripts/check-live.mjs",
+    "test:e2e": "node tests/e2e.mjs",
+    "package": "npm run build && electron-builder --win portable --x64",
+    "package:dir": "npm run build && electron-builder --win --dir --x64"
+  },
+  "dependencies": {
+    "@neteasecloudmusicapienhanced/api": "4.41.1",
+    "@sansenjian/qq-music-api": "2.6.0",
+    "@xmldom/xmldom": "^0.9.12",
+    "kugoumusicapi": "file:vendor/kugou",
+    "music-metadata": "^11.16.1",
+    "qrcode": "^1.5.4"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.64.1",
+    "@types/node": "latest",
+    "@types/react": "latest",
+    "@types/react-dom": "latest",
+    "@vitejs/plugin-react": "latest",
+    "electron": "45.1.0",
+    "electron-builder": "26.18.0",
+    "lucide-react": "latest",
+    "playwright": "latest",
+    "prettier": "^3.9.10",
+    "react": "latest",
+    "react-dom": "latest",
+    "typescript": "latest",
+    "vite": "^8.0.0"
+  },
+  "build": {
+    "appId": "local.sonora.desktop",
+    "productName": "Sonora",
+    "artifactName": "Sonora-${version}-Windows-x64.${ext}",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "main/**/*",
+      "profiles/**/*",
+      "build/icon.ico",
+      "package.json",
+      "THIRD-PARTY-NOTICES.md"
+    ],
+    "asar": true,
+    "win": {
+      "target": [
+        "portable"
+      ],
+      "icon": "build/icon.ico",
+      "signExecutable": false
+    },
+    "portable": {
+      "artifactName": "Sonora-${version}-Windows-x64.exe"
+    }
+  }
+}
