@@ -9,6 +9,7 @@ export class DownloadMetadata {
     this.timeout = timeout;
   }
   async prepare(file, extension, track, { signal } = {}) {
+    signal?.throwIfAborted();
     const bounded = signal
       ? AbortSignal.any([signal, AbortSignal.timeout(this.timeout)])
       : AbortSignal.timeout(this.timeout);

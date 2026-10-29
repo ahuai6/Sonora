@@ -281,6 +281,30 @@ test("failed staging cleans the copy while leaving the audio input byte-exact", 
   assert(!fs.existsSync(raw + ".flac"));
 });
 
+test("an already cancelled download never starts metadata requests or creates a staged file", async (t) => {
+  const { dir, editor } = setup(t),
+    raw = path.join(dir, "download.part");
+  fs.copyFileSync("tests/fixtures/tag-tone.flac", raw);
+  let calls = 0;
+  const metadata = new DownloadMetadata(
+    {
+      forTrack: async () => {
+        calls++;
+        throw Error("must not request");
+      },
+    },
+    editor,
+  );
+  const control = new AbortController();
+  control.abort();
+  await assert.rejects(
+    metadata.prepare(raw, "flac", track(), { signal: control.signal }),
+    { name: "AbortError" },
+  );
+  assert.equal(calls, 0);
+  assert(!fs.existsSync(raw + ".flac"));
+});
+
 for (const platform of ["netease", "qq", "kugou"]) {
   test(`${platform}: automatic metadata lookup uses the downloaded ID without a keyword search`, async () => {
     const seen = [],
