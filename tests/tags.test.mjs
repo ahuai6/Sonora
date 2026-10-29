@@ -7,6 +7,8 @@ import { Store } from "../main/core/store.mjs";
 import { MusicLibrary } from "../main/services/files.mjs";
 import { TagEditor, readTags } from "../main/services/tag-editor.mjs";
 import { MediaService } from "../main/services/media.mjs";
+import { spawn } from "node:child_process";
+import { once } from "node:events";
 
 function audioPayload(b, ext) {
   if (ext === "wav") {
@@ -195,7 +197,7 @@ test("a failed final file replacement preserves the audio and releases the edit 
           revision: snapshot.revision,
           tags: { title: "Must not replace" },
         }),
-      /File locked/,
+      /无法替换原文件/,
     );
   } finally {
     fs.promises.rename = rename;
@@ -208,3 +210,116 @@ test("a failed final file replacement preserves the audio and releases the edit 
   });
   assert.equal(saved.editor.tags.title, "After failure");
 });
+test("transient Windows-style replacement failures retry before committing the validated edit", async () => {
+  const { editor, id, file } = await setup("flac");
+  const s = await editor.read(id),
+    rename = fs.promises.rename;
+  let attempts = 0;
+  fs.promises.rename = async (from, to) => {
+    if (path.basename(from).startsWith(".sonora-tag-") && ++attempts < 3)
+      throw Object.assign(Error("Transient sharing violation"), {
+        code: "EPERM",
+      });
+    return rename(from, to);
+  };
+  try {
+    const r = await editor.save(id, {
+      revision: s.revision,
+      tags: {
+        year: 2020,
+        track: 1,
+        trackCount: 1,
+        disc: 1,
+        discCount: 1,
+        genre: "J-Pop",
+        composer: "Ayase",
+        isrc: "JPA301900001",
+      },
+      lyrics: "[00:00]Lyrics",
+    });
+    assert.equal(attempts, 3);
+    assert.equal(r.editor.tags.composer, "Ayase");
+    assert.equal(r.editor.lyrics, "[00:00]Lyrics");
+  } finally {
+    fs.promises.rename = rename;
+  }
+});
+test("save a separately named edited copy without changing or overwriting the original", async () => {
+  const { editor, id, file, dir, library } = await setup("flac");
+  const before = fs.readFileSync(file),
+    s = await editor.read(id),
+    copyTo = path.join(dir, "Edited copy.flac");
+  const result = await editor.save(
+    id,
+    {
+      revision: s.revision,
+      tags: { title: "Edited copy" },
+      lyrics: "embedded",
+    },
+    { copyTo },
+  );
+  assert.equal(result.editor.tags.title, "Edited copy");
+  assert.notEqual(result.editor.item.id, id);
+  assert.equal(library.list().length, 2);
+  assert.deepEqual(fs.readFileSync(file), before);
+  await assert.rejects(
+    () =>
+      editor.save(
+        id,
+        { revision: s.revision, tags: { title: "Must not overwrite" } },
+        { copyTo },
+      ),
+    /已存在/,
+  );
+  assert.equal(readTags(copyTo).tags.title, "Edited copy");
+  assert.deepEqual(fs.readFileSync(file), before);
+});
+test("active local media streams are closed and blocked until metadata writing finishes", async () => {
+  const { editor, id, file, library } = await setup("flac");
+  const media = new MediaService({ coverDir: library.coverDir }),
+    url = media.register({ path: file });
+  const response = await media.handle(new Request(url));
+  assert.equal(response.status, 200);
+  assert(media.readers.size);
+  const resume = await media.suspendFile(file);
+  assert.equal(media.readers.size, 0);
+  assert.equal((await media.handle(new Request(url))).status, 423);
+  resume();
+  const fresh = await media.handle(new Request(url));
+  assert.equal(fresh.status, 200);
+  await fresh.body.cancel().catch(() => {});
+  await response.body.cancel().catch(() => {});
+});
+test(
+  "real Windows sharing violations clear after the external reader releases its handle",
+  { skip: process.platform !== "win32" },
+  async () => {
+    const { editor, id, file } = await setup("flac"),
+      s = await editor.read(id);
+    const child = spawn(
+      "powershell.exe",
+      [
+        "-NoProfile",
+        "-NonInteractive",
+        "-File",
+        path.resolve("tests/fixtures/hold-file.ps1"),
+        file,
+        "450",
+      ],
+      { windowsHide: true, stdio: ["ignore", "pipe", "pipe"] },
+    );
+    const exited = once(child, "exit");
+    await once(child.stdout, "data");
+    try {
+      const result = await editor.save(id, {
+        revision: s.revision,
+        tags: { year: 2020, track: 1 },
+        lyrics: "while externally locked",
+      });
+      assert.equal(result.editor.tags.year, 2020);
+      assert.equal(result.editor.lyrics, "while externally locked");
+    } finally {
+      await exited;
+    }
+  },
+);

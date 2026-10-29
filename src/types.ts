@@ -179,6 +179,18 @@ export interface API {
     },
   ): Promise<TagSaveResult>;
   tagRestore(id: string, revision: string): Promise<TagSaveResult>;
+  tagSaveCopy(
+    id: string,
+    patch: {
+      revision: string;
+      tags: MusicTags;
+      lyrics?: string;
+      artwork?: string | null;
+    },
+  ): Promise<TagSaveResult | null>;
+  tagMatchDetails(
+    matchId: string,
+  ): Promise<{ tags: MusicTags; missingFields: string[]; warnings: string[] }>;
   tagSearch(input: {
     localId: string;
     query: string;

@@ -1,6 +1,14 @@
 import { randomUUID } from "node:crypto";
+import fs from "node:fs";
 import { jsonRequest } from "../core/transport.mjs";
-import { httpUrl } from "../core/models.mjs";
+import { httpUrl, first } from "../core/models.mjs";
+import {
+  EXTENDED_TAG_FIELDS,
+  platformTags,
+  musicBrainzTags,
+  mappedTags,
+  present,
+} from "./metadata-tags.mjs";
 import { lyricDocument, exportLyrics } from "./lyrics.mjs";
 const names = (credits) =>
   (credits || [])
@@ -9,7 +17,7 @@ const names = (credits) =>
 const quoted = (s) => '"' + String(s).replace(/["\\]/g, " ").trim() + '"';
 const ua = {
   "User-Agent":
-    "Sonora/1.1 (music-tag-editor; https://github.com/ahuai6/Sonora)",
+    "Sonora/1.2.1 (music-tag-editor; https://github.com/ahuai6/Sonora)",
 };
 export class MetadataMatcher {
   constructor(providers, library) {
@@ -18,6 +26,13 @@ export class MetadataMatcher {
     this.candidates = new Map();
     this.mbQueue = Promise.resolve();
     this.lastMb = 0;
+    try {
+      this.defaultPlatforms = JSON.parse(
+        fs.readFileSync(providers.defaults, "utf8"),
+      ).platforms;
+    } catch {
+      this.defaultPlatforms = [];
+    }
   }
   source(id) {
     const overrides = this.providers.config.metadataSources || {};
@@ -59,6 +74,139 @@ export class MetadataMatcher {
     if (!c || Date.now() - c.createdAt > 20 * 60000)
       throw Error("匹配结果已过期，请重新搜索");
     return c;
+  }
+  async details(id) {
+    const c = this.known(id);
+    if (!c.detailsPromise)
+      c.detailsPromise = this.loadDetails(c).catch((e) => {
+        c.detailsPromise = null;
+        throw e;
+      });
+    return c.detailsPromise;
+  }
+  async loadDetails(c) {
+    let tags = { ...c.tags },
+      warnings = [];
+    if (c.source === "musicbrainz") {
+      let recording = { id: c.tags.musicBrainzTrackId },
+        release = {};
+      try {
+        recording = await this.mb(
+          "/recording/" + encodeURIComponent(recording.id),
+          { inc: "artists+isrcs+genres+work-rels+work-level-rels+artist-rels" },
+        );
+      } catch (e) {
+        warnings.push("录音详情：" + e.message);
+      }
+      if (c.releaseId)
+        try {
+          release = await this.mb(
+            "/release/" + encodeURIComponent(c.releaseId),
+            { inc: "recordings+artist-credits+genres" },
+          );
+        } catch (e) {
+          warnings.push("发行详情：" + e.message);
+        }
+      tags = { ...tags, ...musicBrainzTags(recording, release) };
+    } else if (c.track) {
+      const source = c.source,
+        profile = this.providers.profile(source),
+        defaults = this.defaultPlatforms.find((p) => p.id === source);
+      const route = (op) => profile.routes[op] || defaults?.routes?.[op];
+      const call = async (op, extra = {}) => {
+        const r = route(op);
+        if (!r) return null;
+        const vars = this.providers.variables(source, {
+          ...c.track.meta,
+          id: c.track.id,
+          songId: Number(c.track.meta?.songId) || Number(c.track.id) || 0,
+          ...extra,
+        });
+        return this.providers.bridge.call(
+          { ...profile, routes: { ...profile.routes, [op]: r } },
+          op,
+          vars,
+        );
+      };
+      let body,
+        albumBody,
+        song = {},
+        album = {},
+        songs = [];
+      try {
+        body = await call("metadataDetail");
+      } catch (e) {
+        warnings.push("歌曲详情：" + e.message);
+      }
+      if (source === "netease")
+        song = first(body, ["songs.0", "data.songs.0"], {});
+      if (source === "qq")
+        song = first(
+          body,
+          ["track_info", "data.track_info", "songinfo.data.track_info"],
+          {},
+        );
+      if (source === "kugou")
+        song = first(body, ["data.0", "data.info.0", "data"], {});
+      const albumId =
+        (source === "qq" && song.album?.mid) ||
+        song.al?.id ||
+        song.album?.id ||
+        song.album?.mid ||
+        song.album_id ||
+        song.album_info?.album_id ||
+        c.track.meta?.albumId;
+      if (albumId)
+        try {
+          albumBody = await call("metadataAlbum", { albumId: String(albumId) });
+        } catch (e) {
+          warnings.push("专辑详情：" + e.message);
+        }
+      if (source === "netease") {
+        album = albumBody?.album || {};
+        songs = albumBody?.songs || [];
+        songs.complete = !!album.size && songs.length === album.size;
+      }
+      if (source === "qq") {
+        const data = albumBody?.data || albumBody || {};
+        album = data.basicInfo || data;
+        songs = data.songInfoList || album.list || album.songlist || [];
+      }
+      if (source === "kugou")
+        album = first(
+          albumBody,
+          ["data.0", "data.info.0", "data"],
+          song.album_info || {},
+        );
+      tags = {
+        ...tags,
+        ...platformTags(source, song, album, songs),
+        ...mappedTags(body, route("metadataDetail")?.metadataPaths),
+        ...mappedTags(albumBody, route("metadataAlbum")?.metadataPaths),
+      };
+      if (source === "netease" && !tags.composer) {
+        try {
+          const raw = await call("metadataCredits");
+          const original = raw?.lrc?.lyric || raw?.lyric || "";
+          const line = original
+            .split(/\r?\n/)
+            .find((l) => /作\s*曲\s*[:：]/.test(l));
+          if (line) {
+            const composer = line
+              .replace(/^.*?作\s*曲\s*[:：]\s*/, "")
+              .replace(/<\d+:\d+(?:\.\d+)?>/g, "")
+              .trim();
+            if (composer) tags.composer = composer;
+          }
+        } catch {}
+      }
+    }
+    c.tags = present(tags);
+    return {
+      tags: c.tags,
+      missingFields: EXTENDED_TAG_FIELDS.filter((f) => !c.tags[f]),
+      warnings,
+    };
   }
   async search({ localId, query = "", source = "all" }) {
     const local = this.library.known(localId);

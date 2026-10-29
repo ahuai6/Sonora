@@ -1,5 +1,9 @@
 # 声屿 Sonora
 
+## 1.2.1 标签匹配与文件占用修复
+
+“采用标签”会继续读取歌曲 / 专辑详情和可用创作者信息，补全年份、流派、曲序、碟序、作曲、ISRC 等扩展字段；缺失字段明确提示。保存会释放本应用的音频读取流，并重试短暂的 Windows 文件占用；持续失败时保留编辑内容，可另存为副本。详见 [1.2.1 修复说明](docs/release-1.2.1.md)。
+
 ## 1.2.0 本地音乐标签编辑
 
 本地音乐列表支持显示内嵌封面。点击歌曲右侧的标签按钮，可编辑元数据、封面和歌词，并从网易云、QQ、酷狗、MusicBrainz / Cover Art Archive、LRCLIB 匹配候选。保存写入音频本身，保留恢复备份，不重新编码。详见 [本地音乐标签编辑](docs/本地音乐标签编辑.md)。
@@ -16,7 +20,7 @@ Windows 多平台音乐试听、下载与本地音乐管理应用。Electron + R
 
 ## 直接使用
 
-运行 `Sonora-1.2.0-Windows-x64.exe` 即可，无需安装 Node.js 或另外启动接口服务器。适用于 Windows 10 / 11 x64。免安装程序首次启动会解压运行文件，配置默认存放在 `%APPDATA%\Sonora`，下载默认保存到系统音乐目录下的 `Sonora` 文件夹。
+运行 `Sonora-1.2.1-Windows-x64.exe` 即可，无需安装 Node.js 或另外启动接口服务器。适用于 Windows 10 / 11 x64。免安装程序首次启动会解压运行文件，配置默认存放在 `%APPDATA%\Sonora`，下载默认保存到系统音乐目录下的 `Sonora` 文件夹。
 
 1. 在顶部输入关键词，按 Enter 聚合搜索；可分别选择网易云、QQ、酷狗以及歌曲、歌手、专辑、歌单。
 2. 点击歌曲名称或行前播放按钮试听；底部提供进度、音量、循环模式、队列和期望音质。
@@ -55,7 +59,7 @@ Windows 多平台音乐试听、下载与本地音乐管理应用。Electron + R
 可通过命令行指定独立配置目录，例如：
 
 ```powershell
-.\Sonora-1.2.0-Windows-x64.exe --user-data-dir="D:\SonoraData"
+.\Sonora-1.2.1-Windows-x64.exe --user-data-dir="D:\SonoraData"
 ```
 
 ## 源码开发
@@ -77,7 +81,7 @@ npm run test:live
 npm run package
 ```
 
-`npm run package` 生成 `release/Sonora-1.2.0-Windows-x64.exe`。默认生成未签名的免安装版；正式分发需要自行配置代码签名证书。
+`npm run package` 生成 `release/Sonora-1.2.1-Windows-x64.exe`。默认生成未签名的免安装版；正式分发需要自行配置代码签名证书。
 
 ## 代码结构
 

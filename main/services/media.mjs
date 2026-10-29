@@ -6,6 +6,36 @@ export class MediaService {
   constructor({ coverDir } = {}) {
     this.entries = new Map();
     this.coverDir = coverDir;
+    this.readers = new Map();
+    this.suspended = new Map();
+  }
+  fileKey(file) {
+    const value = path.resolve(file);
+    return process.platform === "win32" ? value.toLowerCase() : value;
+  }
+  async suspendFile(file) {
+    const key = this.fileKey(file);
+    this.suspended.set(key, (this.suspended.get(key) || 0) + 1);
+    try {
+      await Promise.all(
+        [...(this.readers.get(key) || [])].map(
+          (stream) =>
+            new Promise((resolve) => {
+              if (stream.closed) return resolve();
+              stream.once("close", resolve);
+              stream.destroy();
+            }),
+        ),
+      );
+    } catch (e) {
+      this.resumeFile(key);
+      throw e;
+    }
+    return () => this.resumeFile(key);
+  }
+  resumeFile(key) {
+    const n = (this.suspended.get(key) || 1) - 1;
+    n ? this.suspended.set(key, n) : this.suspended.delete(key);
   }
   register(source) {
     const id = randomUUID();
@@ -47,6 +77,9 @@ export class MediaService {
     const range = req.headers.get("Range");
     try {
       if (item.path) {
+        const key = this.fileKey(item.path);
+        if (this.suspended.has(key))
+          return new Response("File is being edited", { status: 423 });
         const stat = await fs.promises.stat(item.path);
         let start = 0,
           end = stat.size - 1,
@@ -72,10 +105,22 @@ export class MediaService {
         };
         if (status === 206)
           headers["Content-Range"] = `bytes ${start}-${end}/${stat.size}`;
-        return new Response(
-          Readable.toWeb(fs.createReadStream(item.path, { start, end })),
-          { status, headers },
-        );
+        if (this.suspended.has(key))
+          return new Response("File is being edited", { status: 423 });
+        const stream = fs.createReadStream(item.path, { start, end });
+        if (!this.readers.has(key)) this.readers.set(key, new Set());
+        this.readers.get(key).add(stream);
+        const abort = () => stream.destroy();
+        req.signal?.addEventListener("abort", abort, { once: true });
+        stream.on("error", () => {});
+        stream.once("close", () => {
+          req.signal?.removeEventListener("abort", abort);
+          const readers = this.readers.get(key);
+          readers?.delete(stream);
+          if (!readers?.size) this.readers.delete(key);
+        });
+        if (req.signal?.aborted) abort();
+        return new Response(Readable.toWeb(stream), { status, headers });
       }
       const response = await fetch(item.url, {
         headers: { ...item.headers, ...(range ? { Range: range } : {}) },

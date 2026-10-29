@@ -33,6 +33,32 @@ export const TAG_FIELDS = [
   ...Object.keys(numbers),
 ];
 const revision = (s) => `${s.size}:${s.mtimeMs}:${s.ctimeMs}`;
+export async function replaceFileWithRetry(
+  temp,
+  file,
+  expectedRevision,
+  { delays = [0, 60, 120, 240, 480, 900] } = {},
+) {
+  for (let attempt = 0; attempt < delays.length; attempt++) {
+    if (delays[attempt])
+      await new Promise((r) => setTimeout(r, delays[attempt]));
+    if (revision(await fs.promises.stat(file)) !== expectedRevision)
+      throw Error("重试期间文件被其他程序修改，请重新打开编辑器");
+    try {
+      await fs.promises.rename(temp, file);
+      return;
+    } catch (e) {
+      if (!["EPERM", "EACCES", "EBUSY"].includes(e.code)) throw e;
+      if (attempt === delays.length - 1)
+        throw Object.assign(
+          Error(
+            "无法替换原文件：文件仍被其他程序占用，或当前没有替换权限。原文件未修改，编辑内容已保留；请关闭占用后重试，或选择“另存为副本”。",
+          ),
+          { code: e.code, cause: e },
+        );
+    }
+  }
+}
 export function imageType(b) {
   if (b.subarray(0, 3).equals(Buffer.from([255, 216, 255])))
     return { mime: "image/jpeg", ext: "jpg" };
@@ -87,11 +113,12 @@ export function readTags(file) {
   }
 }
 export class TagEditor {
-  constructor(store, library) {
+  constructor(store, library, { beforeWrite } = {}) {
     this.store = store;
     this.library = library;
     this.locks = new Set();
     this.backupDir = path.join(store.dir, "tag-backups");
+    this.beforeWrite = beforeWrite;
   }
   async read(id) {
     const item = this.library.known(id),
@@ -159,66 +186,73 @@ export class TagEditor {
     }
     return { tags, lyrics: patch.lyrics, artwork };
   }
-  async save(id, patch) {
+  async save(id, patch, { copyTo } = {}) {
     const input = this.validate(patch);
-    return this.commit(id, patch.revision, async (temp) => {
-      const f = File.createFromPath(temp);
-      try {
-        if (!f.isWritable || f.isPossiblyCorrupt)
-          throw Error("此文件不支持安全写入标签，原文件未修改");
-        for (const [key, value] of Object.entries(input.tags)) {
-          if (key in arrays)
-            f.tag[arrays[key]] = value
-              .split(/\s*;\s*/)
-              .map((x) => x.trim())
-              .filter(Boolean);
-          else f.tag[scalar[key] || numbers[key]] = value;
-        }
-        if (input.lyrics !== undefined) f.tag.lyrics = input.lyrics;
-        if (input.artwork === null) f.tag.pictures = [];
-        else if (input.artwork) {
-          const p = Picture.fromData(
-            ByteVector.fromByteArray(input.artwork.data),
-          );
-          p.type = PictureType.FrontCover;
-          p.mimeType = input.artwork.mime;
-          p.description = "Front cover";
-          f.tag.pictures = [
-            p,
-            ...f.tag.pictures.filter((p) => p.type !== PictureType.FrontCover),
-          ];
-        }
-        f.save();
-      } finally {
-        f.dispose();
-      }
-      const saved = readTags(temp);
-      for (const [key, value] of Object.entries(input.tags)) {
-        const expected =
-          key in arrays
-            ? value
+    return this.commit(
+      id,
+      patch.revision,
+      async (temp) => {
+        const f = File.createFromPath(temp);
+        try {
+          if (!f.isWritable || f.isPossiblyCorrupt)
+            throw Error("此文件不支持安全写入标签，原文件未修改");
+          for (const [key, value] of Object.entries(input.tags)) {
+            if (key in arrays)
+              f.tag[arrays[key]] = value
                 .split(/\s*;\s*/)
                 .map((x) => x.trim())
-                .filter(Boolean)
-                .join("; ")
-            : value;
-        if (saved.tags[key] !== expected)
-          throw Error(`此格式未能保存 ${key} 标签，原文件未修改`);
-      }
-      if (
-        input.lyrics !== undefined &&
-        saved.lyrics.replace(/\r\n/g, "\n") !==
-          input.lyrics.replace(/\r\n/g, "\n")
-      )
-        throw Error("此格式未能保存内嵌歌词，原文件未修改");
-      if (
-        input.artwork &&
-        !saved.pictures.some((p) => p.data.equals(input.artwork.data))
-      )
-        throw Error("封面写入验证失败，原文件未修改");
-      if (input.artwork === null && saved.pictures.length)
-        throw Error("封面移除验证失败，原文件未修改");
-    });
+                .filter(Boolean);
+            else f.tag[scalar[key] || numbers[key]] = value;
+          }
+          if (input.lyrics !== undefined) f.tag.lyrics = input.lyrics;
+          if (input.artwork === null) f.tag.pictures = [];
+          else if (input.artwork) {
+            const p = Picture.fromData(
+              ByteVector.fromByteArray(input.artwork.data),
+            );
+            p.type = PictureType.FrontCover;
+            p.mimeType = input.artwork.mime;
+            p.description = "Front cover";
+            f.tag.pictures = [
+              p,
+              ...f.tag.pictures.filter(
+                (p) => p.type !== PictureType.FrontCover,
+              ),
+            ];
+          }
+          f.save();
+        } finally {
+          f.dispose();
+        }
+        const saved = readTags(temp);
+        for (const [key, value] of Object.entries(input.tags)) {
+          const expected =
+            key in arrays
+              ? value
+                  .split(/\s*;\s*/)
+                  .map((x) => x.trim())
+                  .filter(Boolean)
+                  .join("; ")
+              : value;
+          if (saved.tags[key] !== expected)
+            throw Error(`此格式未能保存 ${key} 标签，原文件未修改`);
+        }
+        if (
+          input.lyrics !== undefined &&
+          saved.lyrics.replace(/\r\n/g, "\n") !==
+            input.lyrics.replace(/\r\n/g, "\n")
+        )
+          throw Error("此格式未能保存内嵌歌词，原文件未修改");
+        if (
+          input.artwork &&
+          !saved.pictures.some((p) => p.data.equals(input.artwork.data))
+        )
+          throw Error("封面写入验证失败，原文件未修改");
+        if (input.artwork === null && saved.pictures.length)
+          throw Error("封面移除验证失败，原文件未修改");
+      },
+      { copyTo },
+    );
   }
   async restore(id, expectedRevision) {
     const backup = this.store.data.tagBackups?.[id];
@@ -229,16 +263,27 @@ export class TagEditor {
       fs.promises.copyFile(backupFile, temp),
     );
   }
-  async commit(id, expectedRevision, write) {
+  async commit(id, expectedRevision, write, { copyTo } = {}) {
     const item = this.library.known(id);
+    if (
+      copyTo &&
+      (!path.isAbsolute(copyTo) ||
+        path.resolve(copyTo).toLowerCase() ===
+          path.resolve(item.path).toLowerCase() ||
+        path.extname(copyTo).toLowerCase() !==
+          path.extname(item.path).toLowerCase())
+    )
+      throw Error("副本必须使用不同文件名，并保留原音频格式");
     if (this.locks.has(id)) throw Error("此歌曲正在保存，请稍后重试");
     this.locks.add(id);
     const file = item.path,
       temp = path.join(
-        path.dirname(file),
+        path.dirname(copyTo || file),
         `.sonora-tag-${randomUUID()}${path.extname(file)}`,
       );
+    let resume;
     try {
+      if (!copyTo) resume = await this.beforeWrite?.(file);
       const stat = await fs.promises.stat(file);
       if (!expectedRevision || revision(stat) !== expectedRevision)
         throw Error("文件已发生变化，请重新打开编辑器，避免覆盖外部修改");
@@ -257,6 +302,28 @@ export class TagEditor {
         throw Error("标签写入后的音频校验失败，原文件未修改");
       if (revision(await fs.promises.stat(file)) !== expectedRevision)
         throw Error("保存期间文件被其他程序修改，请重新载入");
+      if (copyTo) {
+        try {
+          await fs.promises.copyFile(temp, copyTo, fs.constants.COPYFILE_EXCL);
+        } catch (e) {
+          if (e.code === "EEXIST")
+            throw Error("所选副本文件已存在，请选择新的文件名");
+          throw e;
+        }
+        const result = await this.library.importFiles([copyTo], {
+          force: true,
+        });
+        const copied = this.library
+          .list()
+          .find(
+            (i) =>
+              path.resolve(i.path).toLowerCase() ===
+              path.resolve(copyTo).toLowerCase(),
+          );
+        if (!copied)
+          throw Error("副本已保存，但音乐库未能载入，可重新扫描该文件夹");
+        return { items: result.items, editor: await this.read(copied.id) };
+      }
       await fs.promises.mkdir(this.backupDir, { recursive: true });
       const backup = `${id}-${randomUUID()}${path.extname(file)}`;
       await fs.promises.copyFile(
@@ -268,11 +335,12 @@ export class TagEditor {
       this.store.data.tagBackups ||= {};
       this.store.data.tagBackups[id] = backup;
       this.store.save();
-      await fs.promises.rename(temp, file);
+      await replaceFileWithRetry(temp, file, expectedRevision);
       const result = await this.library.importFiles([file], { force: true });
       return { items: result.items, editor: await this.read(id) };
     } finally {
       await fs.promises.unlink(temp).catch(() => {});
+      resume?.();
       this.locks.delete(id);
     }
   }

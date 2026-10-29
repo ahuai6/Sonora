@@ -296,8 +296,27 @@ if (!app.requestSingleInstanceLock()) {
     });
     bind("tagRead", (id) => tagEditor.read(id));
     bind("tagSave", (id, patch) => tagEditor.save(id, patch));
+    bind("tagSaveCopy", async (id, patch) => {
+      const item = library.known(id),
+        extension = path.extname(item.path).slice(1);
+      const picked = await dialog.showSaveDialog(win, {
+        title: "另存已编辑的音频副本",
+        defaultPath: path.join(
+          path.dirname(item.path),
+          path.basename(item.path, path.extname(item.path)) +
+            " - 已编辑." +
+            extension,
+        ),
+        filters: [
+          { name: extension.toUpperCase() + " 音频", extensions: [extension] },
+        ],
+      });
+      if (picked.canceled) return null;
+      return tagEditor.save(id, patch, { copyTo: picked.filePath });
+    });
     bind("tagRestore", (id, revision) => tagEditor.restore(id, revision));
     bind("tagSearch", (input) => metadataMatcher.search(input));
+    bind("tagMatchDetails", (id) => metadataMatcher.details(id));
     bind("tagMatchLyrics", (id, options) =>
       metadataMatcher.lyrics(id, options),
     );
@@ -605,7 +624,9 @@ if (!app.requestSingleInstanceLock()) {
     path.join(root, "profiles/providers.json"),
   );
   library = new MusicLibrary(store);
-  tagEditor = new TagEditor(store, library);
+  tagEditor = new TagEditor(store, library, {
+    beforeWrite: (file) => media.suspendFile(file),
+  });
   metadataMatcher = new MetadataMatcher(providers, library);
   downloads = new DownloadManager(store, providers, library);
   media = new MediaService({ coverDir: library.coverDir });

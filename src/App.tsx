@@ -839,7 +839,7 @@ export default function App() {
             </button>
           </div>
           <div className="sidebar-foot">
-            SONORA DESKTOP <span>1.2</span>
+            SONORA DESKTOP <span>{boot?.version || "1.2.1"}</span>
           </div>
         </aside>
         <main className="workspace">
@@ -1810,13 +1810,45 @@ export default function App() {
           item={tagItem}
           onClose={() => setTagItem(null)}
           notify={notify}
-          beforeSave={() => {
-            if (currentRef.current?.id === tagItem.id) {
+          beforeSave={async () => {
+            if (
+              currentRef.current?.id === tagItem.id &&
+              currentRef.current?.platform === "local"
+            ) {
               playGeneration.current++;
               audio.current?.pause();
               audio.current?.removeAttribute("src");
               audio.current?.load();
               setPlaying(false);
+              await new Promise<void>((resolve) => {
+                const player = audio.current;
+                if (
+                  !player ||
+                  player.networkState === HTMLMediaElement.NETWORK_EMPTY
+                )
+                  return resolve();
+                const finish = () => {
+                  player.removeEventListener("emptied", finish);
+                  resolve();
+                };
+                player.addEventListener("emptied", finish, { once: true });
+                setTimeout(finish, 200);
+              });
+            }
+          }}
+          afterSave={async () => {
+            const current = currentRef.current;
+            if (current?.id !== tagItem.id || current.platform !== "local")
+              return;
+            try {
+              const resolved = await window.sonora.resolve(
+                current,
+                boot?.settings.quality || "high",
+              );
+              if (currentRef.current?.id === current.id && audio.current)
+                audio.current.src = resolved.mediaUrl;
+            } catch (e) {
+              notify((e as Error).message, true);
             }
           }}
           onSaved={(result) => {
@@ -1834,13 +1866,6 @@ export default function App() {
             ) {
               currentRef.current = next;
               setCurrent(next);
-              window.sonora
-                .resolve(next, boot?.settings.quality || "high")
-                .then((r) => {
-                  if (currentRef.current?.id === next.id && audio.current)
-                    audio.current.src = r.mediaUrl;
-                })
-                .catch((e) => notify(e.message, true));
               window.sonora
                 .lyrics(next)
                 .then(setLyric)

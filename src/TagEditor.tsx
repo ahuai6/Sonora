@@ -46,12 +46,14 @@ export default function TagEditor({
   onClose,
   onSaved,
   beforeSave,
+  afterSave,
   notify,
 }: {
   item: Item;
   onClose: () => void;
   onSaved: (result: TagSaveResult) => void;
-  beforeSave: () => void;
+  beforeSave: () => void | Promise<void>;
+  afterSave: () => void | Promise<void>;
   notify: (message: string, error?: boolean) => void;
 }) {
   const [snapshot, setSnapshot] = useState<TagSnapshot | null>(null),
@@ -73,6 +75,7 @@ export default function TagEditor({
     [lyricSource, setLyricSource] = useState(""),
     [coverUrl, setCoverUrl] = useState(""),
     [confirmClose, setConfirmClose] = useState(false);
+  const [matchNote, setMatchNote] = useState("");
   const generation = useRef(0),
     mounted = useRef(true),
     editedFields = useRef(new Set<string>());
@@ -121,7 +124,12 @@ export default function TagEditor({
     try {
       await fn();
     } catch (e) {
-      setError((e as Error).message);
+      setError(
+        (e as Error).message.replace(
+          /^Error invoking remote method '[^']+': (?:Error: )?/,
+          "",
+        ),
+      );
     } finally {
       if (mounted.current) setBusy("");
     }
@@ -147,18 +155,29 @@ export default function TagEditor({
       if (gen === generation.current) setSearching(false);
     }
   }
-  function adopt(c: TagCandidate) {
-    Object.entries(c.tags)
+  async function adopt(c: TagCandidate) {
+    const result = await window.sonora.tagMatchDetails(c.matchId);
+    Object.entries(result.tags)
       .filter(([, v]) => v !== "" && v !== 0)
       .forEach(([key]) => editedFields.current.add(key));
     setTags((t) => ({
       ...t,
       ...Object.fromEntries(
-        Object.entries(c.tags).filter(([, v]) => v !== "" && v !== 0),
+        Object.entries(result.tags).filter(([, v]) => v !== "" && v !== 0),
       ),
     }));
     setDirty(true);
-    notify("已填入候选标签，可继续修改后保存");
+    const label = Object.fromEntries(fields);
+    setMatchNote(
+      (result.missingFields.length
+        ? "源站未提供：" +
+          result.missingFields.map((k) => label[k] || k).join("、") +
+          "。可手动补充。"
+        : "已取得扩展标签。") +
+        (result.warnings.length ? " " + result.warnings.join("；") : ""),
+    );
+    setTab("tags");
+    notify("已查询详情并填入可用标签，可继续修改后保存");
   }
   async function artwork(url?: string) {
     const r = await window.sonora.tagArtwork(url);
@@ -187,21 +206,33 @@ export default function TagEditor({
     setTab("lyrics");
     notify("歌词已载入，可编辑后内嵌");
   }
-  async function save() {
+  async function save(copy = false) {
     if (!snapshot) return;
     await action("save", async () => {
-      beforeSave();
-      const result = await window.sonora.tagSave(item.id, {
+      if (!copy) await beforeSave();
+      const patch = {
         revision: snapshot.revision,
         tags: Object.fromEntries(
           Object.entries(tags).filter(([key]) => editedFields.current.has(key)),
         ),
         ...(writeLyrics ? { lyrics } : {}),
         ...(cover !== undefined ? { artwork: cover } : {}),
-      });
-      onSaved(result);
-      load(result.editor);
-      notify("标签、封面和歌词已保存，原文件已备份");
+      };
+      try {
+        const result = copy
+          ? await window.sonora.tagSaveCopy(item.id, patch)
+          : await window.sonora.tagSave(item.id, patch);
+        if (!result) return;
+        onSaved(result);
+        load(result.editor);
+        notify(
+          copy
+            ? "已保存为新副本，原文件保持不变"
+            : "标签、封面和歌词已保存，原文件已备份",
+        );
+      } finally {
+        if (!copy) await afterSave();
+      }
     });
   }
   const requestClose = () => {
@@ -306,7 +337,14 @@ export default function TagEditor({
                           type={numeric.has(key) ? "number" : "text"}
                           min={0}
                           max={65535}
-                          value={tags[key] ?? ""}
+                          placeholder={
+                            numeric.has(key) ? "未提供" : "可手动填写"
+                          }
+                          value={
+                            numeric.has(key) && Number(tags[key]) === 0
+                              ? ""
+                              : (tags[key] ?? "")
+                          }
                           onChange={(e) => change(key, e.target.value)}
                           disabled={!!busy}
                         />
@@ -322,6 +360,11 @@ export default function TagEditor({
                         disabled={!!busy}
                       />
                     </label>
+                    {matchNote && (
+                      <p className="tag-note tag-span" role="status">
+                        {matchNote}
+                      </p>
+                    )}
                     <p className="tag-note tag-span">
                       多个歌手、作曲者或流派使用英文分号分隔。未编辑的其他标签会保留。
                     </p>
@@ -400,7 +443,9 @@ export default function TagEditor({
                               <button
                                 className="text-button"
                                 disabled={!!busy}
-                                onClick={() => adopt(c)}
+                                onClick={() =>
+                                  action(c.matchId, () => adopt(c))
+                                }
                               >
                                 <Check size={13} />
                                 采用标签
@@ -536,14 +581,18 @@ export default function TagEditor({
                 onClick={() =>
                   action("restore", async () => {
                     if (!snapshot) return;
-                    beforeSave();
-                    const result = await window.sonora.tagRestore(
-                      item.id,
-                      snapshot.revision,
-                    );
-                    onSaved(result);
-                    load(result.editor);
-                    notify("已恢复上一次保存前的文件");
+                    await beforeSave();
+                    try {
+                      const result = await window.sonora.tagRestore(
+                        item.id,
+                        snapshot.revision,
+                      );
+                      onSaved(result);
+                      load(result.editor);
+                      notify("已恢复上一次保存前的文件");
+                    } finally {
+                      await afterSave();
+                    }
                   })
                 }
               >
@@ -551,6 +600,13 @@ export default function TagEditor({
                 恢复上次备份
               </button>
               <div className="inline-actions">
+                <button
+                  className="button secondary"
+                  disabled={!!busy || !snapshot?.writable || !dirty}
+                  onClick={() => save(true)}
+                >
+                  另存为副本
+                </button>
                 <button
                   className="button secondary"
                   disabled={!!busy}
@@ -561,7 +617,7 @@ export default function TagEditor({
                 <button
                   className="button primary"
                   disabled={!!busy || !snapshot?.writable || !dirty}
-                  onClick={save}
+                  onClick={() => save()}
                 >
                   {busy ? (
                     <Loader2 size={16} className="spin" />

@@ -123,6 +123,27 @@
           "params": {
             "id": "{id}"
           }
+        },
+        "metadataDetail": {
+          "module": "song_detail",
+          "path": "/song/detail",
+          "params": {
+            "ids": "{id}"
+          }
+        },
+        "metadataAlbum": {
+          "module": "album",
+          "path": "/album",
+          "params": {
+            "id": "{albumId}"
+          }
+        },
+        "metadataCredits": {
+          "module": "lyric",
+          "path": "/lyric",
+          "params": {
+            "id": "{id}"
+          }
         }
       }
     },
@@ -322,6 +343,27 @@
             "quality": "{qqQuality}",
             "mediaId": "{mediaId}"
           }
+        },
+        "metadataDetail": {
+          "path": "/song/detail",
+          "gateway": {
+            "module": "music.pf_song_detail_svr",
+            "method": "get_song_detail_yqq",
+            "param": {
+              "song_mid": "{id}",
+              "song_id": "{songId}"
+            }
+          }
+        },
+        "metadataAlbum": {
+          "path": "/album/detail",
+          "gateway": {
+            "module": "music.musichallAlbum.AlbumInfoServer",
+            "method": "GetAlbumDetail",
+            "param": {
+              "albumMid": "{albumId}"
+            }
+          }
         }
       }
     },
@@ -452,6 +494,22 @@
             "album_audio_id": "{albumAudioId}",
             "quality": "{kgQuality}",
             "free_part": 0
+          }
+        },
+        "metadataDetail": {
+          "module": "krm_audio",
+          "path": "/krm/audio",
+          "params": {
+            "album_audio_id": "{albumAudioId}",
+            "fields": "album_info,base,authors.base,audio_info,extra,tags,tagmap"
+          }
+        },
+        "metadataAlbum": {
+          "module": "album",
+          "path": "/album",
+          "params": {
+            "album_id": "{albumId}",
+            "fields": "album_name,publish_date,author_name,authors,language,style,genre,song_count"
           }
         }
       }

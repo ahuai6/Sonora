@@ -5,6 +5,7 @@ import fs from "node:fs";
 import path from "node:path";
 import http from "node:http";
 import { once } from "node:events";
+import { spawn } from "node:child_process";
 import assert from "node:assert/strict";
 fs.mkdirSync("test-artifacts", { recursive: true });
 const dir = fs.mkdtempSync(path.resolve("test-artifacts/e2e-"));
@@ -44,6 +45,36 @@ const server = http.createServer((req, res) => {
   const u = new URL(req.url, base || "http://localhost");
   const p = u.searchParams.get("platform") || "netease";
   const op = u.pathname;
+  if (op === "/metadataDetail") {
+    const song = {
+      id: p + "-song-1",
+      no: 3,
+      cd: "02",
+      publishTime: 1577836800000,
+      genre: "J-Pop",
+      composer: "Fixture Composer",
+      isrc: "TEST26000001",
+      al: { id: 9 },
+    };
+    res.setHeader("Content-Type", "application/json");
+    res.end(JSON.stringify({ songs: [song], track_info: song, data: [song] }));
+    return;
+  }
+  if (op === "/metadataAlbum") {
+    res.setHeader("Content-Type", "application/json");
+    res.end(
+      JSON.stringify({
+        album: {
+          size: 12,
+          disc_count: 2,
+          publishTime: 1577836800000,
+          artists: [{ name: "Fixture Album Artist" }],
+        },
+        songs: [],
+      }),
+    );
+    return;
+  }
   if (op === "/cover") {
     res.setHeader("Content-Type", "image/png");
     res.end(fs.readFileSync("build/icon.png"));
@@ -182,15 +213,19 @@ for (const p of config.platforms) {
     r.path =
       op === "search"
         ? "/search"
-        : op === "charts"
-          ? "/charts"
-          : op === "recommend"
-            ? "/recommend"
-            : ["lyrics", "lyricsWord"].includes(op)
-              ? "/lyrics"
-              : ["resolve", "download"].includes(op)
-                ? "/resolve"
-                : "/collection";
+        : op.startsWith("metadata")
+          ? op === "metadataCredits"
+            ? "/lyrics"
+            : "/" + op
+          : op === "charts"
+            ? "/charts"
+            : op === "recommend"
+              ? "/recommend"
+              : ["lyrics", "lyricsWord"].includes(op)
+                ? "/lyrics"
+                : ["resolve", "download"].includes(op)
+                  ? "/resolve"
+                  : "/collection";
     r.params = { platform: p.id, id: "{id}", type: "{type}" };
     r.items = ["items"];
     delete r.fallbacks;
@@ -346,6 +381,10 @@ try {
   await expect(page.locator(".track-row")).toHaveCount(1);
   assert(fs.existsSync(fixture));
   checks++;
+  await page.locator(".track-row .track-index").first().click();
+  await expect
+    .poll(() => page.locator("audio").evaluate((a) => a.currentTime))
+    .toBeGreaterThan(0.05);
   await page.getByRole("button", { name: /^编辑 .* 标签$/ }).click();
   const editor = page.getByRole("dialog", { name: "编辑音乐标签" });
   await expect(editor.getByLabel("标签曲名", { exact: true })).toBeVisible();
@@ -398,6 +437,33 @@ try {
   await expect(
     editor.getByLabel("内嵌歌词内容", { exact: true }),
   ).toContainText("Test track");
+  await editor.getByRole("button", { name: "在线匹配", exact: true }).click();
+  await editor
+    .getByRole("button", { name: "采用标签", exact: true })
+    .first()
+    .click();
+  await expect(editor.getByLabel("标签年份", { exact: true })).toHaveValue(
+    "2020",
+  );
+  await expect(editor.getByLabel("标签流派", { exact: true })).toHaveValue(
+    "J-Pop",
+  );
+  await expect(editor.getByLabel("标签曲序", { exact: true })).toHaveValue("3");
+  await expect(editor.getByLabel("标签总曲数", { exact: true })).toHaveValue(
+    "12",
+  );
+  await expect(editor.getByLabel("标签碟序", { exact: true })).toHaveValue("2");
+  await expect(editor.getByLabel("标签总碟数", { exact: true })).toHaveValue(
+    "2",
+  );
+  await expect(editor.getByLabel("标签作曲", { exact: true })).toHaveValue(
+    "Fixture Composer",
+  );
+  await expect(editor.getByLabel("标签ISRC", { exact: true })).toHaveValue(
+    "TEST26000001",
+  );
+  await editor.getByLabel("标签曲名", { exact: true }).fill("本地标签已修改");
+  await editor.getByRole("button", { name: "内嵌歌词", exact: true }).click();
   await editor
     .getByLabel("内嵌歌词内容", { exact: true })
     .fill("[00:00.000]手动修改后的内嵌歌词");
@@ -418,7 +484,15 @@ try {
     const s = await window.sonora.bootstrap();
     return (await window.sonora.tagRead(s.library[0].id)).tags;
   });
-  assert.equal(rawTags.artist, "");
+  assert.equal(rawTags.comment, "");
+  assert.equal(rawTags.year, 2020);
+  assert.equal(rawTags.genre, "J-Pop");
+  assert.equal(rawTags.track, 3);
+  assert.equal(rawTags.trackCount, 12);
+  assert.equal(rawTags.disc, 2);
+  assert.equal(rawTags.discCount, 2);
+  assert.equal(rawTags.composer, "Fixture Composer");
+  assert.equal(rawTags.isrc, "TEST26000001");
   await editor.getByRole("button", { name: "关闭", exact: true }).click();
   await expect(page.locator(".track-row .artwork img")).toHaveCount(1);
   await expect
@@ -435,6 +509,71 @@ try {
   await expect(editor.getByLabel("内嵌歌词内容", { exact: true })).toHaveValue(
     "[00:00.000]手动修改后的内嵌歌词",
   );
+  const originalPath = await page.evaluate(
+    async () => (await window.sonora.bootstrap()).library[0].path,
+  );
+  const originalBytes = fs.readFileSync(originalPath);
+  await editor
+    .getByLabel("内嵌歌词内容", { exact: true })
+    .fill("[00:00.000]锁定后保留的编辑内容");
+  if (process.platform === "win32") {
+    const reader = spawn(
+      "powershell.exe",
+      [
+        "-NoProfile",
+        "-NonInteractive",
+        "-File",
+        path.resolve("tests/fixtures/hold-file.ps1"),
+        "-FilePath",
+        originalPath,
+        "-Milliseconds",
+        "15000",
+      ],
+      { windowsHide: true },
+    );
+    const closed = once(reader, "exit");
+    try {
+      const [ready] = await once(reader.stdout, "data");
+      assert.match(String(ready), /LOCKED/);
+      await editor
+        .getByRole("button", { name: "保存到文件", exact: true })
+        .click();
+      await expect(editor.getByRole("alert")).toContainText("无法替换原文件");
+      await expect(
+        editor.getByLabel("内嵌歌词内容", { exact: true }),
+      ).toHaveValue("[00:00.000]锁定后保留的编辑内容");
+      assert(fs.readFileSync(originalPath).equals(originalBytes));
+      await expect
+        .poll(() => page.locator("audio").getAttribute("src"))
+        .toContain("sonora-media:");
+    } finally {
+      reader.kill();
+      await closed;
+    }
+    checks++;
+  }
+  const editedCopy = path.join(music, "edited-copy.wav");
+  await app.evaluate(({ dialog }, file) => {
+    dialog.showSaveDialog = async () => ({ canceled: false, filePath: file });
+  }, editedCopy);
+  await editor.getByRole("button", { name: "另存为副本", exact: true }).click();
+  await expect.poll(() => fs.existsSync(editedCopy)).toBe(true);
+  await expect
+    .poll(() =>
+      page.evaluate(
+        async () => (await window.sonora.bootstrap()).library.length,
+      ),
+    )
+    .toBe(2);
+  assert(fs.readFileSync(originalPath).equals(originalBytes));
+  await editor.getByRole("button", { name: "内嵌歌词", exact: true }).click();
+  await expect(editor.getByLabel("内嵌歌词内容", { exact: true })).toHaveValue(
+    "[00:00.000]锁定后保留的编辑内容",
+  );
+  await expect(
+    editor.getByRole("button", { name: "保存到文件", exact: true }),
+  ).toBeDisabled();
+  checks++;
   await editor.getByRole("button", { name: "关闭", exact: true }).click();
   checks += 6;
   await page.getByRole("button", { name: "偏好与音源", exact: true }).click();
