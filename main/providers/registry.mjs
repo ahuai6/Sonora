@@ -655,13 +655,37 @@ export class ProviderRegistry {
           const params = renderTemplate(r.params, vars);
           let url,
             size = 0,
-            br = 0;
+            br = 0,
+            trial = false;
+          const timeout = Math.min(
+            60000,
+            Math.max(1000, Number(r.timeout) || 10000),
+          );
           if (r.mode === "json") {
             const body = await jsonRequest(r.url, {
               params,
               headers: r.headers || {},
-              timeout: 10000,
+              timeout,
             });
+            if (r.codePaths) {
+              const code = first(body, r.codePaths, undefined);
+              if (
+                code === undefined ||
+                !(r.successCodes || [200]).map(String).includes(String(code))
+              )
+                throw Error(`备用接口未成功返回 (${code ?? "无状态码"})`);
+            }
+            if (
+              r.idPaths &&
+              String(first(body, r.idPaths, "")) !== String(track.id)
+            )
+              throw Error("备用接口返回的歌曲 ID 不匹配");
+            const flag = r.trialPaths
+              ? first(body, r.trialPaths, false)
+              : false;
+            trial = !!flag && !["0", "false", "null"].includes(String(flag));
+            if (purpose === "download" && trial)
+              throw Error("当前备用接口仅提供试听片段");
             url = first(body, r.urlPaths || ["url"], "");
             size = Number(first(body, r.sizePaths || [], 0));
             br = Number(first(body, r.bitratePaths || [], 0));
@@ -680,7 +704,7 @@ export class ProviderRegistry {
             const response = await request(r.url, {
               params,
               headers: r.headers || {},
-              timeout: 10000,
+              timeout,
               redirect: "manual",
             });
             if (response.status >= 300 && response.status < 400)
@@ -692,7 +716,7 @@ export class ProviderRegistry {
             url: httpUrl(url),
             headers: {},
             source: r.name,
-            trial: false,
+            trial,
             quality: br
               ? `${Math.round(br > 5000 ? br / 1000 : br)} kbps`
               : "音质待音频确认",
