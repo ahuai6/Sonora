@@ -42,6 +42,7 @@ export type Download = {
     | "tagging"
     | "committing"
     | "completed"
+    | "missing"
     | "failed"
     | "paused"
     | "cancelled";
@@ -115,6 +116,16 @@ export type Bootstrap = {
   platform: string;
 };
 export type MusicTags = Record<string, string | number>;
+export type CollectionResult = {
+  items: Item[];
+  jobs: Download[];
+  imported?: number;
+  removed?: number;
+  changed?: number;
+  skipped?: number;
+  cancelled?: boolean;
+  failures: { message: string }[];
+};
 export type TagSnapshot = {
   item: Item;
   tags: MusicTags;
@@ -177,6 +188,12 @@ export interface API {
     quality: Quality,
   ): Promise<{ added: number; jobs: Download[] }>;
   downloadAction(id: string, action: string): Promise<Download[]>;
+  refreshFiles(): Promise<CollectionResult>;
+  collectionBatch(
+    scope: "library" | "downloads",
+    ids: string[],
+    action: string,
+  ): Promise<CollectionResult>;
   chooseDirectory(): Promise<string | null>;
   scanLibrary(
     folder?: string,

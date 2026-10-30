@@ -1156,6 +1156,7 @@ button:active:not(:disabled) {
 }
 .list-toolbar {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: 15px;
@@ -1167,6 +1168,7 @@ button:active:not(:disabled) {
 }
 .list-toolbar > div {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
 }
 .track-table {
@@ -2082,6 +2084,32 @@ button:active:not(:disabled) {
 }
 .download-row.completed .download-progress i {
   background: #83b39b;
+}
+.download-row.missing .download-progress i {
+  background: var(--muted);
+}
+.download-state.missing {
+  color: #c47762;
+}
+.batch-selection {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--muted);
+  font-size: 11px;
+}
+.download-row > input[type="checkbox"],
+.batch-selection > input {
+  width: 15px;
+  height: 15px;
+  flex-shrink: 0;
+  accent-color: var(--accent);
+}
+.button.danger {
+  color: #bc655b;
+}
+.batch-disabled {
+  opacity: 0.5;
 }
 .download-row.failed .download-progress i {
   background: #ce9294;
@@ -3052,6 +3080,13 @@ body:has([role="dialog"]) .toast-stack {
   transform: translateX(50%);
   max-width: min(420px, 50vw);
   max-height: min(64px, 9vh);
+  overflow-y: auto;
+}
+body:has(.download-tabs, .library-toolbar):not(:has([role="dialog"]))
+  .toast-stack {
+  top: auto;
+  bottom: 110px;
+  max-height: min(270px, 40vh);
   overflow-y: auto;
 }
 .row-more {

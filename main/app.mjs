@@ -33,6 +33,7 @@ import { TagEditor, readTags } from "./services/tag-editor.mjs";
 import { MetadataMatcher } from "./services/metadata-match.mjs";
 import { fetchArtwork, normalizeArtwork } from "./services/artwork.mjs";
 import { DownloadMetadata } from "./services/download-metadata.mjs";
+import { CollectionActions } from "./services/collection-actions.mjs";
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 app.setName("Sonora");
 if (!app.isPackaged && process.env.SONORA_DATA_DIR)
@@ -63,6 +64,7 @@ if (!app.requestSingleInstanceLock()) {
     media,
     tagEditor,
     metadataMatcher;
+  let collections;
   const logins = new Map();
   let shuttingDown = false;
   app.on("second-instance", () => {
@@ -232,6 +234,16 @@ if (!app.requestSingleInstanceLock()) {
       );
     });
     bind("downloadAction", (id, action) => downloads.action(id, action));
+    bind("refreshFiles", async () => {
+      const result = await collections.refresh();
+      win.webContents.send("sonora:library", result.items);
+      return result;
+    });
+    bind("collectionBatch", async (scope, ids, action) => {
+      const result = await collections.batch(scope, ids, action);
+      win.webContents.send("sonora:library", result.items);
+      return result;
+    });
     bind("chooseDirectory", () => pickDirectory("选择下载目录"));
     bind("scanLibrary", async (folder) => {
       if (!folder) folder = await pickDirectory("扫描本地音乐文件夹");
@@ -593,6 +605,23 @@ if (!app.requestSingleInstanceLock()) {
     }),
   });
   media = new MediaService({ coverDir: library.coverDir });
+  collections = new CollectionActions(library, downloads, {
+    confirmTrash: async (count) =>
+      (
+        await dialog.showMessageBox(win, {
+          type: "warning",
+          title: "批量移入回收站",
+          message: `将所选 ${count} 个音频文件移入 Windows 回收站？`,
+          detail:
+            "会移动磁盘上的音频，并移除对应音乐库记录。旁置歌词不受影响。",
+          buttons: ["取消", "移入回收站"],
+          defaultId: 0,
+          cancelId: 0,
+        })
+      ).response === 1,
+    trashFile: (file) => shell.trashItem(file),
+    suspendFile: (file) => media.suspendFile(file),
+  });
   protocol.handle("sonora-media", (request) => media.handle(request));
   win = new BrowserWindow({
     width: 1360,

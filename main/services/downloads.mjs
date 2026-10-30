@@ -14,6 +14,8 @@ export class DownloadManager extends EventEmitter {
     this.library = library;
     this.metadata = metadata;
     this.running = new Map();
+    this.tasks = new Map();
+    this.batchDepth = 0;
     this.stopped = false;
     this.jobs = store.data.downloads.map((j) =>
       ["queued", "resolving", "downloading", "tagging", "committing"].includes(
@@ -58,6 +60,77 @@ export class DownloadManager extends EventEmitter {
   }
   publicJobs() {
     return this.jobs.map((x) => ({ ...x }));
+  }
+  async refresh() {
+    for (const job of [...this.jobs]) {
+      if (!["completed", "missing"].includes(job.status)) continue;
+      const status = job.status;
+      let exists = false;
+      try {
+        exists = !!job.path && (await fs.promises.stat(job.path)).isFile();
+      } catch (e) {
+        if (!["ENOENT", "ENOTDIR"].includes(e.code)) continue;
+      }
+      if (!this.jobs.includes(job) || job.status !== status) continue;
+      if (!exists)
+        Object.assign(job, {
+          status: "missing",
+          message: "文件已不存在，可重试下载或移除记录",
+          speed: 0,
+          progress: 0,
+        });
+      else if (status === "missing")
+        Object.assign(job, {
+          status: "completed",
+          message: "已重新找到下载文件",
+          progress: 100,
+        });
+    }
+    this.persist();
+    this.publish();
+    return this.publicJobs();
+  }
+  async batchAction(ids, action) {
+    const selected = new Set(ids),
+      jobs = this.jobs.filter((j) => selected.has(j.id));
+    let changed = 0;
+    this.batchDepth++;
+    try {
+      if (action === "remove") {
+        const waiting = [];
+        for (const job of jobs) {
+          if (
+            job.status === "committing" ||
+            (job.status === "tagging" && job.path)
+          )
+            continue;
+          if (this.running.has(job.id)) {
+            this.action(job.id, "cancel");
+            waiting.push(this.tasks.get(job.id));
+          }
+        }
+        await Promise.allSettled(waiting.filter(Boolean));
+      }
+      for (const job of jobs) {
+        if (
+          action === "cancel" &&
+          !["queued", "resolving", "downloading", "tagging", "paused"].includes(
+            job.status,
+          )
+        )
+          continue;
+        if (action === "pause" && job.path) continue;
+        const before = job.status;
+        this.action(job.id, action);
+        if (!this.jobs.includes(job) || job.status !== before) changed++;
+      }
+    } finally {
+      this.batchDepth--;
+      this.persist();
+      this.publish();
+      this.pump();
+    }
+    return { changed, skipped: jobs.length - changed };
   }
   persist() {
     this.store.data.downloads = this.jobs;
@@ -113,7 +186,7 @@ export class DownloadManager extends EventEmitter {
       return this.publicJobs();
     if (
       action === "retry" &&
-      ["failed", "paused", "cancelled"].includes(job.status)
+      ["failed", "paused", "cancelled", "missing"].includes(job.status)
     ) {
       Object.assign(job, {
         status: "queued",
@@ -146,13 +219,15 @@ export class DownloadManager extends EventEmitter {
     ) {
       this.jobs = this.jobs.filter((j) => j.id !== id);
     }
-    this.persist();
-    this.publish();
-    this.pump();
+    if (!this.batchDepth) {
+      this.persist();
+      this.publish();
+      this.pump();
+    }
     return this.publicJobs();
   }
   pump() {
-    if (this.stopped) return;
+    if (this.stopped || this.batchDepth) return;
     const max = Math.max(
       1,
       Math.min(4, Number(this.store.data.settings.concurrency) || 2),
@@ -164,12 +239,14 @@ export class DownloadManager extends EventEmitter {
       if (!job) break;
       const controller = new AbortController();
       this.running.set(job.id, controller);
-      this.run(job, controller).finally(() => {
+      const task = this.run(job, controller).finally(() => {
         this.running.delete(job.id);
+        this.tasks.delete(job.id);
         this.persist();
         this.publish();
         this.pump();
       });
+      this.tasks.set(job.id, task);
     }
   }
   async run(job, controller) {

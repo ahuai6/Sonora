@@ -10,6 +10,8 @@ const methods = [
   "saveLyrics",
   "download",
   "downloadAction",
+  "refreshFiles",
+  "collectionBatch",
   "chooseDirectory",
   "scanLibrary",
   "importMusic",

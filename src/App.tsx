@@ -37,6 +37,8 @@ import {
   Disc3,
   Heart,
   CheckCircle2,
+  Trash2,
+  ListMinus,
 } from "lucide-react";
 import type {
   Account,
@@ -49,6 +51,7 @@ import type {
   Settings as SettingsType,
   Lyrics,
   Download as Job,
+  CollectionResult,
 } from "./types";
 import {
   Artwork,
@@ -143,6 +146,9 @@ export default function App() {
     [favorites, setFavorites] = useState(false),
     [libraryBusy, setLibraryBusy] = useState(false),
     [librarySort, setLibrarySort] = useState("recent");
+  const [refreshBusy, setRefreshBusy] = useState(false),
+    [localActionBusy, setLocalActionBusy] = useState(false);
+  const refreshPending = useRef<Promise<void> | null>(null);
   const [welcome, setWelcome] = useState(false),
     [toasts, setToasts] = useState<
       { id: number; text: string; error: boolean }[]
@@ -169,6 +175,61 @@ export default function App() {
       error ? 9000 : 4500,
     );
   }, []);
+  const applyCollection = useCallback((result: CollectionResult) => {
+    setBoot((b) =>
+      b ? { ...b, library: result.items, downloads: result.jobs } : b,
+    );
+    const local = currentRef.current;
+    if (
+      local?.platform === "local" &&
+      !result.items.some((x) => x.id === local.id)
+    ) {
+      playGeneration.current++;
+      audio.current?.pause();
+      audio.current?.removeAttribute("src");
+      audio.current?.load();
+      setSource("");
+      setCurrent(null);
+      setPlaying(false);
+      setLyric(null);
+    }
+  }, []);
+  const refreshCollections = useCallback(
+    (silent = false) => {
+      if (refreshPending.current) return refreshPending.current;
+      setRefreshBusy(true);
+      const work = window.sonora
+        .refreshFiles()
+        .then((result) => {
+          applyCollection(result);
+          if (!silent)
+            notify(
+              `列表已刷新${result.removed ? `，已清理 ${result.removed} 条失效音乐记录` : ""}${result.failures.length ? `，${result.failures.length} 个文件暂时无法读取` : ""}`,
+            );
+        })
+        .catch((e) => notify(e.message, true))
+        .finally(() => {
+          refreshPending.current = null;
+          setRefreshBusy(false);
+        });
+      refreshPending.current = work;
+      return work;
+    },
+    [applyCollection, notify],
+  );
+  const bootReady = !!boot;
+  useEffect(() => {
+    if (bootReady && ["library", "downloads"].includes(page))
+      void refreshCollections(true);
+  }, [page, bootReady, refreshCollections]);
+  useEffect(() => {
+    if (page !== "library") return;
+    const valid = new Set(boot?.library.map((item) => item.key));
+    setSelected((old) => {
+      const next = new Set([...old].filter((key) => valid.has(key)));
+      return next.size === old.size ? old : next;
+    });
+  }, [page, boot?.library]);
   useEffect(() => {
     window.sonora
       .bootstrap()
@@ -560,6 +621,26 @@ export default function App() {
       setLibraryBusy(false);
     }
   }
+  async function libraryBatch(items: Item[], action: string) {
+    setLocalActionBusy(true);
+    try {
+      const result = await window.sonora.collectionBatch(
+        "library",
+        items.map((x) => x.id),
+        action,
+      );
+      applyCollection(result);
+      if (!result.cancelled)
+        notify(
+          `已处理 ${result.changed} 首${result.failures.length ? `，${result.failures.length} 首失败：${result.failures[0].message}` : ""}`,
+          !!result.failures.length,
+        );
+    } catch (e) {
+      notify((e as Error).message, true);
+    } finally {
+      setLocalActionBusy(false);
+    }
+  }
   const localItems = useMemo(() => {
     let list = (boot?.library || []).filter(
       (x) =>
@@ -647,19 +728,57 @@ export default function App() {
   const batch = (items: Item[]) => (
     <div className="list-toolbar">
       <span>
-        {selected.size
-          ? `已选择 ${selected.size} 首`
+        {items.some((x) => selected.has(x.key))
+          ? `已选择 ${items.filter((x) => selected.has(x.key)).length} 首`
           : `${items.length} 首歌曲`}
       </span>
       <div>
+        {page === "library" && items.some((x) => selected.has(x.key)) && (
+          <>
+            <button
+              className="button secondary compact"
+              disabled={localActionBusy || refreshBusy}
+              onClick={() =>
+                libraryBatch(
+                  items.filter((x) => selected.has(x.key)),
+                  "remove",
+                )
+              }
+            >
+              <ListMinus size={15} />
+              移除所选记录
+            </button>
+            <button
+              className="button secondary compact danger"
+              disabled={localActionBusy || refreshBusy}
+              onClick={() =>
+                libraryBatch(
+                  items.filter((x) => selected.has(x.key)),
+                  "trash",
+                )
+              }
+            >
+              <Trash2 size={15} />
+              所选移入回收站
+            </button>
+          </>
+        )}
         {page !== "lyrics" && (
           <button
             className="button primary compact"
             disabled={!items.length}
-            onClick={() => playTrack(items[0], items)}
+            onClick={() => {
+              const play =
+                page === "library" && items.some((x) => selected.has(x.key))
+                  ? items.filter((x) => selected.has(x.key))
+                  : items;
+              playTrack(play[0], play);
+            }}
           >
             <Play size={14} fill="currentColor" />
-            播放本页
+            {page === "library" && items.some((x) => selected.has(x.key))
+              ? "播放所选"
+              : "播放本页"}
           </button>
         )}
         {!items.some((i) => i.platform === "local") && page !== "lyrics" && (
@@ -1305,6 +1424,20 @@ export default function App() {
                       <div className="inline-actions">
                         <button
                           className="button secondary"
+                          disabled={
+                            refreshBusy || libraryBusy || localActionBusy
+                          }
+                          onClick={() => refreshCollections()}
+                          aria-label="刷新本地音乐"
+                        >
+                          <RefreshCw
+                            size={16}
+                            className={refreshBusy ? "spin" : ""}
+                          />
+                          刷新
+                        </button>
+                        <button
+                          className="button secondary"
                           disabled={libraryBusy}
                           onClick={() => importLibrary(true)}
                         >
@@ -1410,6 +1543,9 @@ export default function App() {
                     jobs={boot.downloads}
                     onChange={setJobs}
                     notify={notify}
+                    onCollection={applyCollection}
+                    onRefresh={() => refreshCollections()}
+                    refreshing={refreshBusy}
                   />
                 ) : page === "accounts" ? (
                   <Accounts

@@ -78,6 +78,38 @@ export class MusicLibrary {
   list() {
     return this.store.data.library;
   }
+  refresh() {
+    const job = this.importQueue
+      .catch(() => {})
+      .then(async () => {
+        const missing = [],
+          files = [],
+          failures = [];
+        for (const item of [...this.list()]) {
+          try {
+            const stat = await fs.promises.stat(item.path);
+            if (stat.isFile()) files.push(item.path);
+            else missing.push(item.id);
+          } catch (e) {
+            if (["ENOENT", "ENOTDIR"].includes(e.code)) missing.push(item.id);
+            else
+              failures.push({
+                file: path.basename(item.path),
+                message: e.message,
+              });
+          }
+        }
+        this.removeMany(missing);
+        const result = await this.importFilesNow(files);
+        return {
+          ...result,
+          removed: missing.length,
+          failures: [...failures, ...result.failures],
+        };
+      });
+    this.importQueue = job;
+    return job;
+  }
   async scan(folder) {
     folder = path.resolve(folder);
     const found = [];
@@ -209,9 +241,14 @@ export class MusicLibrary {
     return item;
   }
   remove(id) {
-    const item = this.list().find((x) => x.id === id);
-    if (item) this.removedPaths.add(path.resolve(item.path).toLowerCase());
-    this.store.data.library = this.list().filter((x) => x.id !== id);
+    return this.removeMany([id]);
+  }
+  removeMany(ids) {
+    const selected = new Set(ids);
+    for (const item of this.list())
+      if (selected.has(item.id))
+        this.removedPaths.add(path.resolve(item.path).toLowerCase());
+    this.store.data.library = this.list().filter((x) => !selected.has(x.id));
     this.store.save();
     return this.list();
   }
