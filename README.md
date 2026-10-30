@@ -120,6 +120,6 @@ tests/                  核心测试和桌面端流程测试
 docs/                   使用边界、接口扩展与验证记录
 ```
 
-推送与包版本相同的标签（例如 `v1.3.2`）会触发 `.github/workflows/release.yml`，Windows 构建与打包桌面回归成功后自动上传 EXE 和 SHA256；可在 Actions 中手动重跑。main 推送及 PR 另外运行核心测试、构建、依赖审计与桌面回归。
+推送与包版本相同的标签（例如 `v1.3.2`）会触发 `.github/workflows/release.yml`，Windows 构建与打包桌面回归成功后直接将 EXE 和 SHA256 上传至 GitHub Releases。手动运行可另外尝试保存 Actions 产物，保留 3 天；该可选上传失败不影响 Release 发布。main 推送及 PR 另外运行核心测试、构建、依赖审计与桌面回归。
 
 本次 Jerry 针对性验证见 [1.3.2 更新说明](docs/release-1.3.2.md)，批量管理验证见 [1.3.1 更新说明](docs/release-1.3.1.md)，此前全量审查见 [1.3.0 审查修复验证](docs/1.3.0-审查修复验证.md)。旧版接口记录见 [1.1.0 验证与接口记录](docs/1.1.0-验证与接口.md)。第三方引擎与依赖许可证见 `THIRD-PARTY-NOTICES.md`，上游许可证保留在对应包与 vendor 目录中。
