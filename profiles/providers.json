@@ -1,5 +1,6 @@
 {
   "schemaVersion": 1,
+  "bundledResolverMigrations": ["jerry-v1"],
   "platforms": [
     {
       "id": "netease",

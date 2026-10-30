@@ -37,6 +37,8 @@ jobs:
           $env:SONORA_TEST_EXECUTABLE = (Resolve-Path release/win-unpacked/Sonora.exe).Path
           npm run test:e2e
           if ($LASTEXITCODE -ne 0) { throw 'Desktop regression failed' }
+          node tests/jerry-e2e.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'Bundled Jerry upgrade regression failed' }
       - name: Generate SHA256
         shell: pwsh
         run: |

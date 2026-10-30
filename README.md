@@ -1,5 +1,9 @@
 # 声屿 Sonora
 
+## 1.3.2 JerryMusicAPI 随包提供
+
+发布包内置 JerryMusicAPI 网易云备用音源及旧配置兼容逻辑，无需另外下载配置。在“偏好与音源 → 备用取链服务 → 使用的音源”选择“JerryMusicAPI · 网易云”即可。已有的自定义 Jerry 地址和禁用状态保持不变。详见 [1.3.2 更新说明](docs/release-1.3.2.md)。
+
 ## 1.3.1 批量管理与刷新
 
 本地音乐和下载中心新增刷新按钮，进入页面时也会核对文件。已不存在的本地音乐会清理记录，对应下载任务显示“文件已丢失”并支持重试。勾选后可批量移除记录或移入回收站；本地音乐可播放所选，下载任务可批量暂停、取消和重试。移除记录保留文件，移入回收站会统一确认。见 [1.3.1 更新说明](docs/release-1.3.1.md)。
@@ -38,7 +42,7 @@ Windows 多平台音乐试听、下载与本地音乐管理应用。Electron + R
 
 ## 直接使用
 
-运行 `Sonora-1.3.1-Windows-x64.exe` 即可，无需安装 Node.js 或另外启动接口服务器。适用于 Windows 10 / 11 x64。免安装程序首次启动会解压运行文件，配置默认存放在 `%APPDATA%\Sonora`，下载默认保存到系统音乐目录下的 `Sonora` 文件夹。
+运行 `Sonora-1.3.2-Windows-x64.exe` 即可，无需安装 Node.js 或另外启动接口服务器。适用于 Windows 10 / 11 x64。免安装程序首次启动会解压运行文件，配置默认存放在 `%APPDATA%\Sonora`，下载默认保存到系统音乐目录下的 `Sonora` 文件夹。
 
 1. 在顶部输入关键词，按 Enter 聚合搜索；可分别选择网易云、QQ、酷狗以及歌曲、歌手、专辑、歌单。
 2. 点击歌曲名称或行前播放按钮试听；底部提供进度、音量、循环模式、队列和期望音质。
@@ -78,7 +82,7 @@ Windows 多平台音乐试听、下载与本地音乐管理应用。Electron + R
 可通过命令行指定独立配置目录，例如：
 
 ```powershell
-.\Sonora-1.3.1-Windows-x64.exe --user-data-dir="D:\SonoraData"
+.\Sonora-1.3.2-Windows-x64.exe --user-data-dir="D:\SonoraData"
 ```
 
 ## 源码开发
@@ -100,7 +104,7 @@ npm run test:live
 npm run package
 ```
 
-`npm run package` 生成 `release/Sonora-1.3.1-Windows-x64.exe`。默认生成未签名的免安装版；正式分发需要自行配置代码签名证书。
+`npm run package` 生成 `release/Sonora-1.3.2-Windows-x64.exe`。默认生成未签名的免安装版；正式分发需要自行配置代码签名证书。
 
 ## 代码结构
 
@@ -116,6 +120,6 @@ tests/                  核心测试和桌面端流程测试
 docs/                   使用边界、接口扩展与验证记录
 ```
 
-推送与包版本相同的标签（例如 `v1.3.1`）会触发 `.github/workflows/release.yml`，Windows 构建与打包桌面回归成功后自动上传 EXE 和 SHA256；可在 Actions 中手动重跑。main 推送及 PR 另外运行核心测试、构建、依赖审计与桌面回归。
+推送与包版本相同的标签（例如 `v1.3.2`）会触发 `.github/workflows/release.yml`，Windows 构建与打包桌面回归成功后自动上传 EXE 和 SHA256；可在 Actions 中手动重跑。main 推送及 PR 另外运行核心测试、构建、依赖审计与桌面回归。
 
-本次针对性验证见 [1.3.1 更新说明](docs/release-1.3.1.md)，此前全量审查见 [1.3.0 审查修复验证](docs/1.3.0-审查修复验证.md)。旧版接口记录见 [1.1.0 验证与接口记录](docs/1.1.0-验证与接口.md)。第三方引擎与依赖许可证见 `THIRD-PARTY-NOTICES.md`，上游许可证保留在对应包与 vendor 目录中。
+本次 Jerry 针对性验证见 [1.3.2 更新说明](docs/release-1.3.2.md)，批量管理验证见 [1.3.1 更新说明](docs/release-1.3.1.md)，此前全量审查见 [1.3.0 审查修复验证](docs/1.3.0-审查修复验证.md)。旧版接口记录见 [1.1.0 验证与接口记录](docs/1.1.0-验证与接口.md)。第三方引擎与依赖许可证见 `THIRD-PARTY-NOTICES.md`，上游许可证保留在对应包与 vendor 目录中。

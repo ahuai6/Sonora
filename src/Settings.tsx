@@ -59,8 +59,9 @@ export default function Settings({
     try {
       const next = typeof value === "string" ? JSON.parse(value) : value;
       onProviders(await window.sonora.saveProfiles(next));
-      setConfig(next);
-      setJson(JSON.stringify(next, null, 2));
+      const saved = await window.sonora.profiles();
+      setConfig(saved.config);
+      setJson(JSON.stringify(saved.config, null, 2));
       notify("接口配置已生效");
     } catch (e) {
       notify((e as Error).message, true);

@@ -1,4 +1,5 @@
 import { validateProviderConfig } from "./config.mjs";
+import { mergeBundledResolvers } from "./migrations.mjs";
 import fs from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
@@ -52,6 +53,10 @@ export class ProviderRegistry {
           "接口配置无效，已使用内置配置；原文件已保留，可在设置中重新保存。";
       }
     }
+    this.config = mergeBundledResolvers(
+      this.config,
+      JSON.parse(fs.readFileSync(this.defaults, "utf8")),
+    );
     const n = this.config.platforms.find((p) => p.id === "netease");
     if (
       n &&
@@ -72,6 +77,10 @@ export class ProviderRegistry {
   save(c) {
     if (typeof c === "string") c = JSON.parse(c);
     this.validate(c);
+    c = mergeBundledResolvers(
+      c,
+      JSON.parse(fs.readFileSync(this.defaults, "utf8")),
+    );
     fs.writeFileSync(this.file + ".tmp", JSON.stringify(c, null, 2), "utf8");
     fs.renameSync(this.file + ".tmp", this.file);
     fs.writeFileSync(
