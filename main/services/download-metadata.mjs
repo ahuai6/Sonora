@@ -43,7 +43,7 @@ export class DownloadMetadata {
     let cover, lyricText;
     await Promise.all([
       matchTags
-        ? untilAborted(this.matcher.forTrack(track))
+        ? untilAborted(this.matcher.forTrack(track, { signal: bounded }))
             .then((details) => {
               tags = { ...tags, ...present(details.tags) };
               warnings.push(...details.warnings);
@@ -63,7 +63,7 @@ export class DownloadMetadata {
         ? untilAborted(
             Promise.resolve().then(() => {
               if (!this.lyrics) throw Error("歌词接口不可用");
-              return this.lyrics(track);
+              return this.lyrics(track, { signal: bounded });
             }),
           )
             .then((doc) => {

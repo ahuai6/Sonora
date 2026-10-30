@@ -73,6 +73,7 @@ export class MusicLibrary {
     this.store = store;
     this.coverDir = path.join(store.dir, "covers");
     this.importQueue = Promise.resolve();
+    this.removedPaths = new Set();
   }
   list() {
     return this.store.data.library;
@@ -109,6 +110,9 @@ export class MusicLibrary {
     return this.importFiles(found);
   }
   async importFiles(files, { force = false } = {}) {
+    // An explicit later import can re-add a removed item; an in-flight import cannot.
+    for (const file of files)
+      this.removedPaths.delete(path.resolve(file).toLowerCase());
     const job = this.importQueue
       .catch(() => {})
       .then(() => this.importFilesNow(files, { force }));
@@ -186,6 +190,13 @@ export class MusicLibrary {
         failures.push({ file: path.basename(file), message: e.message });
       }
     }
+    const current = new Map(
+      this.list().map((x) => [path.resolve(x.path).toLowerCase(), x]),
+    );
+    for (const [key, item] of existing) {
+      if (this.removedPaths.has(key)) existing.delete(key);
+      else if (current.has(key)) item.favorite = current.get(key).favorite;
+    }
     this.store.data.library = [...existing.values()].sort(
       (a, b) => b.addedAt - a.addedAt,
     );
@@ -198,6 +209,8 @@ export class MusicLibrary {
     return item;
   }
   remove(id) {
+    const item = this.list().find((x) => x.id === id);
+    if (item) this.removedPaths.add(path.resolve(item.path).toLowerCase());
     this.store.data.library = this.list().filter((x) => x.id !== id);
     this.store.save();
     return this.list();

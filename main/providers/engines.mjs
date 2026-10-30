@@ -1,3 +1,4 @@
+import { runSdkRequest } from "./sdk-client.mjs";
 import { createRequire } from "node:module";
 import { randomUUID } from "node:crypto";
 import { jsonRequest, deadline } from "../core/transport.mjs";
@@ -7,6 +8,7 @@ const require = createRequire(import.meta.url);
 const engines = new Map();
 process.env.DEBUG = "false";
 process.env.LOG_LEVEL = "error";
+process.env.DOTENV_CONFIG_QUIET = "true";
 export async function engine(id) {
   if (engines.has(id)) return engines.get(id);
   let v;
@@ -23,7 +25,8 @@ export class EngineBridge {
     this.health = new Map();
     this.inflightDevice = null;
   }
-  async call(profile, op, vars = {}) {
+  async call(profile, op, vars = {}, { signal } = {}) {
+    signal?.throwIfAborted();
     const route = profile.routes[op];
     if (!route) throw Error(`该平台未配置 ${op} 路由`);
     const credential = this.store.credential(profile.id);
@@ -58,6 +61,7 @@ export class EngineBridge {
             method: route.method || "GET",
             body: route.method === "POST" ? params : undefined,
             headers,
+            signal,
           },
         );
       } else if (route.gateway) {
@@ -78,6 +82,7 @@ export class EngineBridge {
           "https://u.y.qq.com/cgi-bin/musicu.fcg",
           {
             method: "POST",
+            signal,
             headers: {
               Referer: "https://y.qq.com/",
               ...(credential.cookie ? { Cookie: credential.cookie } : {}),
@@ -110,8 +115,11 @@ export class EngineBridge {
         if (op === "search" && Number(raw?.meta?.is_filter) < 0)
           throw Error("QQ 搜索需要有效登录态，或当前请求被平台过滤");
       } else {
-        const sdk = await engine(profile.engine);
-        const fn = sdk[route.module];
+        const sdk = signal ? null : await engine(profile.engine);
+        const fn = signal
+          ? (query) =>
+              runSdkRequest(profile.engine, route.module, query, { signal })
+          : sdk[route.module];
         if (typeof fn !== "function")
           throw Error(`引擎缺少模块 ${route.module}，请检查接口配置`);
         raw = await deadline(
@@ -168,8 +176,9 @@ export class EngineBridge {
       throw Error(errorMessage(e));
     }
   }
-  async native(platform, module, params = {}) {
-    const sdk = await engine(platform);
+  async native(platform, module, params = {}, { signal } = {}) {
+    signal?.throwIfAborted();
+    const sdk = signal ? null : await engine(platform);
     const cookie = this.store.credential(platform).cookie;
     const opts =
       platform === "qq"
@@ -182,13 +191,24 @@ export class EngineBridge {
                 : cookie,
           };
     try {
-      return await deadline(sdk[module](opts), 22000);
+      return signal
+        ? await runSdkRequest(platform, module, opts, { signal })
+        : await deadline(sdk[module](opts), 22000);
     } catch (e) {
       throw Error(errorMessage(e));
     }
   }
-  async ensureKugouDevice() {
+  async ensureKugouDevice({ signal } = {}) {
     if (this.store.data.device.dfid) return;
+    if (signal) {
+      const r = await this.native("kugou", "register_dev", {}, { signal });
+      const dfid = first(unwrap(r), ["data.dfid", "dfid"], "");
+      if (dfid) {
+        this.store.data.device.dfid = dfid;
+        this.store.save();
+      }
+      return;
+    }
     this.inflightDevice ??= this.native("kugou", "register_dev")
       .then((r) => {
         const dfid = first(unwrap(r), ["data.dfid", "dfid"], "");

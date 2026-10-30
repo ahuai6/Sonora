@@ -40,6 +40,7 @@ export type Download = {
     | "resolving"
     | "downloading"
     | "tagging"
+    | "committing"
     | "completed"
     | "failed"
     | "paused"
@@ -64,6 +65,7 @@ export type Settings = {
   quality: Quality;
   autoLyrics: boolean;
   autoMetadata: boolean;
+  density: "comfortable" | "compact";
   saveTranslation: boolean;
   lyricFormat: "auto" | "lrc" | "elrc" | "ttml";
   lyricSource: "auto" | "platform" | "amll";
@@ -86,7 +88,15 @@ export type Result = {
   errors: { platform: string; message: string }[];
   hasMore: boolean;
 };
+export type LyricLine = {
+  start: number;
+  end?: number;
+  text: string;
+  translation?: string;
+  words: { start: number; end: number; text: string }[];
+};
 export type Lyrics = {
+  lines?: LyricLine[];
   original: string;
   translation: string;
   romanization: string;
@@ -94,6 +104,7 @@ export type Lyrics = {
   source?: string;
 };
 export type Bootstrap = {
+  configWarning?: string;
   version: string;
   settings: Settings;
   accounts: Account[];

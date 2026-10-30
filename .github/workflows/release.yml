@@ -1,7 +1,7 @@
 name: Build Windows release
 on:
   push:
-    tags: ['v*']
+    tags: ["v*"]
   workflow_dispatch:
 permissions:
   contents: write
@@ -10,10 +10,10 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 25
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-node@v7.1.0
         with:
-          node-version: '24'
+          node-version: "24"
           cache: npm
       - name: Use supported npm
         run: npm install --global npm@11
@@ -30,13 +30,19 @@ jobs:
       - name: Build Windows portable executable
         run: npm run package
         env:
-          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+      - name: Packaged desktop regression
+        shell: pwsh
+        run: |
+          $env:SONORA_TEST_EXECUTABLE = (Resolve-Path release/win-unpacked/Sonora.exe).Path
+          npm run test:e2e
+          if ($LASTEXITCODE -ne 0) { throw 'Desktop regression failed' }
       - name: Generate SHA256
         shell: pwsh
         run: |
           $lines = Get-ChildItem -LiteralPath release -Filter 'Sonora-*-Windows-x64.exe' | ForEach-Object { "$( (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLower() )  $($_.Name)" }
           $lines | Set-Content -LiteralPath release/SHA256.txt -Encoding utf8
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7.0.2
         with:
           name: Sonora-Windows-x64
           path: |

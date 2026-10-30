@@ -41,7 +41,7 @@ License: MIT
 ```text
 MIT License
 
-Copyright (c) 2019 
+Copyright (c) 2019
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -64,8 +64,6 @@ SOFTWARE.
 
 ## kugoumusicapi 1.6.3
 
-
-
 License: MIT
 
 ```text
@@ -85,9 +83,7 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OU
 IN THE SOFTWARE.
 ```
 
-## music-metadata 11.16.1
-
-
+## music-metadata 12.3.2
 
 License: MIT
 
@@ -104,8 +100,6 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 ```
 
 ## node-taglib-sharp 6.0.3
-
-
 
 License: LGPL-2.1-or-later
 
@@ -765,8 +759,6 @@ SOFTWARE.
 
 ## electron 45.1.0
 
-
-
 License: MIT
 
 ```text
@@ -824,4 +816,3 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
-

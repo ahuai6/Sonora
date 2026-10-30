@@ -33,6 +33,7 @@ const fixture = path.join(dir, "fixture.wav");
 fs.writeFileSync(fixture, audio);
 const lrc = "[00:00.00]声屿测试音轨\n[00:01.00]本地生成的验证音频";
 let base;
+let searchDelay = 0;
 const song = (p, n = 1) => ({
   id: p + "-song-" + n,
   name: "测试音轨 " + n,
@@ -45,6 +46,14 @@ const server = http.createServer((req, res) => {
   const u = new URL(req.url, base || "http://localhost");
   const p = u.searchParams.get("platform") || "netease";
   const op = u.pathname;
+  if (op === "/search" && searchDelay) {
+    const end = res.end.bind(res),
+      delay = searchDelay;
+    res.end = (...args) => {
+      setTimeout(() => end(...args), delay);
+      return res;
+    };
+  }
   if (op === "/metadataDetail") {
     const song = {
       id: p + "-song-1",
@@ -371,6 +380,14 @@ try {
   assert.equal(downloadedTags.genre, "J-Pop");
   assert.equal(downloadedTags.composer, "Fixture Composer");
   assert.equal(downloadedTags.isrc, "TEST26000001");
+  const localDoc = await page.evaluate(async () => {
+    const b = await window.sonora.bootstrap();
+    return window.sonora.lyrics(b.library[0]);
+  });
+  assert(localDoc.hasWordTiming);
+  assert.match(localDoc.translation, /Test track/);
+  assert(localDoc.lines[0].words.length);
+  checks++;
   const embedded = await page.evaluate(async () => {
     const b = await window.sonora.bootstrap();
     return (await window.sonora.tagRead(b.library[0].id)).lyrics;
@@ -411,6 +428,11 @@ try {
   await page
     .locator(".track-row")
     .first()
+    .getByLabel(/^更多 .* 操作$/)
+    .click();
+  await page
+    .locator(".track-row")
+    .first()
     .getByRole("button", { name: "移除音乐库记录" })
     .click();
   await expect(page.locator(".track-row")).toHaveCount(1);
@@ -423,6 +445,19 @@ try {
   await page.getByRole("button", { name: /^编辑 .* 标签$/ }).click();
   const editor = page.getByRole("dialog", { name: "编辑音乐标签" });
   await expect(editor.getByLabel("标签曲名", { exact: true })).toBeVisible();
+  await expect
+    .poll(() =>
+      page.evaluate(() => !!document.activeElement?.closest('[role="dialog"]')),
+    )
+    .toBe(true);
+  await editor.getByRole("button", { name: "取消", exact: true }).focus();
+  await page.keyboard.press("Tab");
+  assert(
+    await page.evaluate(
+      () => !!document.activeElement?.closest('[role="dialog"]'),
+    ),
+  );
+  checks++;
   await editor.getByLabel("标签曲名", { exact: true }).fill("本地标签已修改");
   await editor.getByLabel("标签专辑", { exact: true }).fill("手动专辑");
   await editor.getByRole("button", { name: "在线匹配", exact: true }).click();
@@ -699,6 +734,80 @@ try {
   await page.getByRole("button", { name: "本地音乐", exact: true }).click();
   await page.screenshot({ path: "test-artifacts/e2e-narrow-dark.png" });
   checks++;
+
+  await page
+    .getByRole("button", { name: /^编辑 .* 标签$/ })
+    .first()
+    .click();
+  const narrowEditor = page.getByRole("dialog", { name: "编辑音乐标签" });
+  await expect(
+    narrowEditor.getByLabel("标签曲名", { exact: true }),
+  ).toBeVisible();
+  const footer = await narrowEditor.locator(".tag-footer").boundingBox();
+  const view = await page.evaluate(() => ({ h: innerHeight, w: innerWidth }));
+  assert(footer && footer.y >= 0 && footer.y + footer.height <= view.h);
+  const unobstructed = await page.evaluate(() => {
+    const stack = document.querySelector(".toast-stack");
+    const toast = document.createElement("div");
+    toast.className = "toast";
+    toast.textContent = "验证提示不会遮挡保存及关闭按钮";
+    stack.append(toast);
+    const notice = stack.getBoundingClientRect();
+    const controls = [
+      document.querySelector(".tag-footer"),
+      document.querySelector('[role="dialog"] .modal-heading button'),
+    ];
+    const clear = controls.every((control) => {
+      const box = control.getBoundingClientRect();
+      return (
+        notice.right <= box.left ||
+        notice.left >= box.right ||
+        notice.bottom <= box.top ||
+        notice.top >= box.bottom
+      );
+    });
+    toast.remove();
+    return clear;
+  });
+  assert(unobstructed, "Notifications must not cover dialog controls");
+  await page.screenshot({
+    path: "test-artifacts/tag-narrow-fixed.png",
+    animations: "disabled",
+  });
+  await page.keyboard.press("Escape");
+  await expect(narrowEditor).toHaveCount(0);
+  checks++;
+  await page.evaluate(() => document.querySelector("audio").pause());
+  const downloadNav = page
+    .getByRole("button", { name: "下载中心", exact: false })
+    .first();
+  await downloadNav.focus();
+  await page.keyboard.press("Space");
+  await expect(page.getByRole("heading", { name: /下载中心/ })).toBeVisible();
+  assert(await page.locator("audio").evaluate((a) => a.paused));
+  checks++;
+  await page.getByRole("button", { name: "搜索资源", exact: true }).click();
+  const searchBox = page.getByRole("textbox", {
+    name: "搜索音乐资源",
+    exact: true,
+  });
+  await searchBox.fill("慢速审查");
+  searchDelay = 350;
+  await page.getByRole("button", { name: "专辑", exact: true }).click();
+  await page.getByRole("button", { name: "歌词搜索", exact: true }).click();
+  await page.waitForTimeout(550);
+  searchDelay = 0;
+  await expect(page.locator(".track-row")).toHaveCount(0);
+  await expect(page.locator(".music-card")).toHaveCount(0);
+  checks++;
+  await page.getByRole("button", { name: "偏好与音源", exact: true }).click();
+  await page
+    .getByLabel("信息密度", { exact: true })
+    .selectOption("comfortable");
+  await expect(page.locator(".app-shell")).not.toHaveClass(/compact-density/);
+  await page.getByLabel("信息密度", { exact: true }).selectOption("compact");
+  await expect(page.locator(".app-shell")).toHaveClass(/compact-density/);
+  checks++;
   assert.deepEqual(errors, []);
   const encrypted = await app.evaluate(({ safeStorage }) => ({
     available: safeStorage.isEncryptionAvailable(),
@@ -707,6 +816,15 @@ try {
       "sonora-test-secret",
   }));
   assert(encrypted.available && encrypted.protected);
+  checks++;
+  const sdkProbe = await app.evaluate(async ({ app }) => {
+    const require = process
+      .getBuiltinModule("node:module")
+      .createRequire(app.getAppPath() + "/package.json");
+    const { runSdkRequest } = require("./main/providers/sdk-client.mjs");
+    return runSdkRequest("netease", "song_detail", {}, { inspect: true });
+  });
+  assert(sdkProbe.available);
   checks++;
   console.log(
     JSON.stringify({

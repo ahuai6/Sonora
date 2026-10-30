@@ -18,6 +18,7 @@ const labels: Record<string, string> = {
   resolving: "获取音源",
   downloading: "下载中",
   tagging: "写入标签",
+  committing: "正在保存",
   completed: "已完成",
   failed: "失败",
   paused: "已暂停",
@@ -37,13 +38,20 @@ export default function DownloadView({
     (j) =>
       filter === "all" ||
       (filter === "active" &&
-        ["queued", "resolving", "downloading", "tagging", "paused"].includes(
-          j.status,
-        )) ||
+        [
+          "queued",
+          "resolving",
+          "downloading",
+          "tagging",
+          "committing",
+          "paused",
+        ].includes(j.status)) ||
       filter === j.status,
   );
   const active = jobs.filter((j) =>
-    ["queued", "resolving", "downloading", "tagging"].includes(j.status),
+    ["queued", "resolving", "downloading", "tagging", "committing"].includes(
+      j.status,
+    ),
   ).length;
   const action = (id: string, a: string) =>
     window.sonora
@@ -148,9 +156,12 @@ export default function DownloadView({
                   <CheckCircle2 size={15} />
                 ) : j.status === "failed" ? (
                   <AlertCircle size={15} />
-                ) : ["resolving", "downloading", "tagging"].includes(
-                    j.status,
-                  ) ? (
+                ) : [
+                    "resolving",
+                    "downloading",
+                    "tagging",
+                    "committing",
+                  ].includes(j.status) ? (
                   <Loader2 size={15} className="spin" />
                 ) : null}
                 {labels[j.status]}
@@ -191,6 +202,7 @@ export default function DownloadView({
                   </button>
                 ) : (
                   j.status !== "cancelled" &&
+                  j.status !== "committing" &&
                   !j.path && (
                     <button
                       className="icon-button"
@@ -202,9 +214,13 @@ export default function DownloadView({
                     </button>
                   )
                 )}
-                {!["resolving", "downloading", "tagging", "queued"].includes(
-                  j.status,
-                ) && (
+                {![
+                  "resolving",
+                  "downloading",
+                  "tagging",
+                  "committing",
+                  "queued",
+                ].includes(j.status) && (
                   <button
                     className="icon-button"
                     title="移除任务记录"

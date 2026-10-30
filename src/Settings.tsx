@@ -132,6 +132,22 @@ export default function Settings({
             ))}
           </select>
         </div>
+        <div className="setting-row">
+          <div>
+            <strong>信息密度</strong>
+            <p>紧凑模式减少顶部留白，为音乐列表保留更多空间</p>
+          </div>
+          <select
+            aria-label="信息密度"
+            value={settings.density}
+            onChange={(e) =>
+              change({ density: e.target.value as SettingsType["density"] })
+            }
+          >
+            <option value="compact">紧凑</option>
+            <option value="comfortable">舒适</option>
+          </select>
+        </div>
         {[
           [
             "autoMetadata",

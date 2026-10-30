@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useState, useRef, type ReactNode } from "react";
 import { Music2, Loader2, X, ChevronRight } from "lucide-react";
 import type { Item } from "./types";
 export const platformNames: Record<string, string> = {
@@ -112,6 +112,57 @@ export function Modal({
   onClose: () => void;
   wide?: boolean;
 }) {
+  const dialogRef = useRef<HTMLElement>(null),
+    closeRef = useRef(onClose);
+  closeRef.current = onClose;
+  useEffect(() => {
+    const previous = document.activeElement as HTMLElement | null;
+    const dialog = dialogRef.current!;
+    const top = () =>
+      [...document.querySelectorAll('[role="dialog"]')].at(-1) === dialog;
+    const focusable = () =>
+      [
+        ...dialog.querySelectorAll<HTMLElement>(
+          'button:not(:disabled),input:not(:disabled),textarea:not(:disabled),select:not(:disabled),a[href],[tabindex="0"]',
+        ),
+      ].filter((x) => x.getBoundingClientRect().width > 0);
+    const frame = requestAnimationFrame(() =>
+      (focusable()[0] || dialog).focus(),
+    );
+    const key = (e: KeyboardEvent) => {
+      if (!top()) return;
+      if (e.key === "Escape") {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        closeRef.current();
+      }
+      if (e.key === "Tab") {
+        const nodes = focusable(),
+          index = nodes.indexOf(document.activeElement as HTMLElement);
+        if (
+          !nodes.length ||
+          index < 0 ||
+          (!e.shiftKey && index === nodes.length - 1) ||
+          (e.shiftKey && index === 0)
+        ) {
+          e.preventDefault();
+          (e.shiftKey ? nodes.at(-1) : nodes[0])?.focus();
+        }
+      }
+    };
+    const focus = (e: FocusEvent) => {
+      if (top() && !dialog.contains(e.target as Node))
+        (focusable()[0] || dialog).focus();
+    };
+    document.addEventListener("keydown", key, true);
+    document.addEventListener("focusin", focus);
+    return () => {
+      cancelAnimationFrame(frame);
+      document.removeEventListener("keydown", key, true);
+      document.removeEventListener("focusin", focus);
+      if (previous?.isConnected) previous.focus();
+    };
+  }, []);
   return (
     <div
       className="modal-backdrop"
@@ -120,6 +171,8 @@ export function Modal({
       }}
     >
       <section
+        ref={dialogRef}
+        tabIndex={-1}
         className={`modal ${wide ? "wide" : ""}`}
         role="dialog"
         aria-modal="true"
@@ -134,7 +187,7 @@ export function Modal({
             <X size={20} />
           </button>
         </div>
-        {children}
+        <div className="modal-content">{children}</div>
       </section>
     </div>
   );

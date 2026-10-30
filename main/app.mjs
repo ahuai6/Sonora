@@ -1,3 +1,4 @@
+import { stopSdkWorkers } from "./providers/sdk-client.mjs";
 import {
   app,
   BrowserWindow,
@@ -22,7 +23,12 @@ import { MediaService } from "./services/media.mjs";
 import { PLATFORMS, safeName, httpUrl } from "./core/models.mjs";
 import { joinCookies } from "./providers/engines.mjs";
 import { errorMessage } from "./core/errors.mjs";
-import { exportLyrics, lyricDocument, parseTtml } from "./services/lyrics.mjs";
+import {
+  exportLyrics,
+  lyricDocument,
+  parseTtml,
+  localLyricDocument,
+} from "./services/lyrics.mjs";
 import { TagEditor, readTags } from "./services/tag-editor.mjs";
 import { MetadataMatcher } from "./services/metadata-match.mjs";
 import { fetchArtwork, normalizeArtwork } from "./services/artwork.mjs";
@@ -106,6 +112,7 @@ if (!app.requestSingleInstanceLock()) {
   function snapshot() {
     return {
       version: app.getVersion(),
+      configWarning: providers.configWarning,
       settings: store.data.settings,
       accounts: store.publicAccounts(),
       downloads: downloads.publicJobs(),
@@ -182,23 +189,10 @@ if (!app.requestSingleInstanceLock()) {
         const text =
           embedded ||
           (await fs.promises.readFile(file, "utf8").catch(() => ""));
-        let doc;
-        if (/<tt[\s>]/.test(text))
-          try {
-            doc = lyricDocument({
-              lines: parseTtml(text),
-              source: "本地内嵌 TTML",
-            });
-          } catch {}
-        doc ||= lyricDocument({
-          original: text,
-          source: embedded ? "本地内嵌歌词" : "本地歌词文件",
-        });
-        if (doc.lines.length)
-          doc.original = exportLyrics(doc, {
-            format: "lrc",
-            bilingual: true,
-          }).text;
+        const doc = localLyricDocument(
+          text,
+          embedded ? "本地内嵌歌词" : "本地歌词文件",
+        );
         return doc;
       }
       return providers.lyrics(knownTrack(track));
@@ -346,6 +340,8 @@ if (!app.requestSingleInstanceLock()) {
       artwork(await metadataMatcher.cover(id)),
     );
     bind("saveSettings", (patch) => {
+      if (patch.density && !["compact", "comfortable"].includes(patch.density))
+        throw Error("信息密度设置不正确");
       if (patch.acceptedDisclaimer !== undefined) {
         store.data.acceptedDisclaimer = !!patch.acceptedDisclaimer;
         store.save();
@@ -593,7 +589,7 @@ if (!app.requestSingleInstanceLock()) {
   downloads = new DownloadManager(store, providers, library, {
     metadata: new DownloadMetadata(metadataMatcher, tagEditor, {
       artwork: (url, options) => fetchArtwork(url, nativeImage, options),
-      lyrics: (track) => providers.lyrics(track),
+      lyrics: (track, options) => providers.lyrics(track, options),
     }),
   });
   media = new MediaService({ coverDir: library.coverDir });
@@ -648,6 +644,7 @@ if (!app.requestSingleInstanceLock()) {
     if (!shuttingDown) {
       shuttingDown = true;
       downloads.stop();
+      stopSdkWorkers();
     }
   });
   app.on("window-all-closed", () => app.quit());

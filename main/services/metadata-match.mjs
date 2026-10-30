@@ -17,7 +17,7 @@ const names = (credits) =>
 const quoted = (s) => '"' + String(s).replace(/["\\]/g, " ").trim() + '"';
 const ua = {
   "User-Agent":
-    "Sonora/1.2.3 (music-tag-editor; https://github.com/ahuai6/Sonora)",
+    "Sonora/1.3.0 (music-tag-editor; https://github.com/ahuai6/Sonora)",
 };
 export class MetadataMatcher {
   constructor(providers, library) {
@@ -84,18 +84,22 @@ export class MetadataMatcher {
       });
     return c.detailsPromise;
   }
-  async forTrack(track) {
-    return this.loadDetails({
-      source: track.platform,
-      track,
-      tags: present({
-        title: track.title,
-        artist: track.artist,
-        album: track.album,
-      }),
-    });
+  async forTrack(track, { signal } = {}) {
+    return this.loadDetails(
+      {
+        source: track.platform,
+        track,
+        tags: present({
+          title: track.title,
+          artist: track.artist,
+          album: track.album,
+        }),
+      },
+      { signal },
+    );
   }
-  async loadDetails(c) {
+  async loadDetails(c, { signal } = {}) {
+    signal?.throwIfAborted();
     let tags = { ...c.tags },
       warnings = [];
     if (c.source === "musicbrainz") {
@@ -125,6 +129,7 @@ export class MetadataMatcher {
         defaults = this.defaultPlatforms.find((p) => p.id === source);
       const route = (op) => profile.routes[op] || defaults?.routes?.[op];
       const call = async (op, extra = {}) => {
+        signal?.throwIfAborted();
         const r = route(op);
         if (!r) return null;
         const vars = this.providers.variables(source, {
@@ -137,6 +142,7 @@ export class MetadataMatcher {
           { ...profile, routes: { ...profile.routes, [op]: r } },
           op,
           vars,
+          { signal },
         );
       };
       let body,
@@ -212,6 +218,7 @@ export class MetadataMatcher {
         } catch {}
       }
     }
+    signal?.throwIfAborted();
     c.tags = present(tags);
     return {
       tags: c.tags,

@@ -1,3 +1,4 @@
+import { validateProviderConfig } from "./config.mjs";
 import fs from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
@@ -15,7 +16,7 @@ import {
   clean,
 } from "../core/models.mjs";
 import { EngineBridge, parseCookie, joinCookies } from "./engines.mjs";
-import { jsonRequest, request } from "../core/transport.mjs";
+import { jsonRequest, request, readBytesLimited } from "../core/transport.mjs";
 import { lyricDocument, parseTtml } from "../services/lyrics.mjs";
 import { decryptQrc, parseQrcXml } from "../vendor/lrc-get/qrc2lrc.js";
 import { errorMessage } from "../core/errors.mjs";
@@ -24,19 +25,33 @@ export class ProviderRegistry {
     this.store = store;
     this.defaults = defaults;
     this.file = path.join(store.dir, "providers.json");
+    this.goodFile = path.join(store.dir, "providers.last-good.json");
+    this.configWarning = "";
     this.bridge = new EngineBridge(store);
     this.authSessions = new Map();
     this.lyricCache = new Map();
     this.reload();
   }
   reload() {
-    this.config = JSON.parse(
-      fs.readFileSync(
-        fs.existsSync(this.file) ? this.file : this.defaults,
-        "utf8",
-      ),
-    );
-    this.validate(this.config);
+    this.configWarning = "";
+    const load = (file) => {
+      const config = JSON.parse(fs.readFileSync(file, "utf8"));
+      this.validate(config);
+      return config;
+    };
+    try {
+      this.config = load(fs.existsSync(this.file) ? this.file : this.defaults);
+    } catch {
+      try {
+        this.config = load(this.goodFile);
+        this.configWarning =
+          "接口配置无效，已载入最近有效配置；原文件已保留，可在设置中重新保存。";
+      } catch {
+        this.config = load(this.defaults);
+        this.configWarning =
+          "接口配置无效，已使用内置配置；原文件已保留，可在设置中重新保存。";
+      }
+    }
     const n = this.config.platforms.find((p) => p.id === "netease");
     if (
       n &&
@@ -52,59 +67,20 @@ export class ProviderRegistry {
       };
   }
   validate(c) {
-    if (
-      c?.schemaVersion !== 1 ||
-      !Array.isArray(c.platforms) ||
-      !Array.isArray(c.resolvers)
-    )
-      throw Error(
-        "接口配置格式不正确：需要 schemaVersion=1、platforms 和 resolvers",
-      );
-    const ids = new Set();
-    for (const p of c.platforms) {
-      if (
-        !PLATFORMS.includes(p.id) ||
-        ids.has(p.id) ||
-        !["netease", "qq", "kugou"].includes(p.engine) ||
-        !p.routes ||
-        !p.searchTypes
-      )
-        throw Error("平台 ID、引擎或路由配置不正确");
-      ids.add(p.id);
-      if (p.baseUrl && !httpUrl(p.baseUrl)) throw Error("接口基础地址不正确");
-      for (const r of Object.values(p.routes)) {
-        if (r.path && !r.path.startsWith("/"))
-          throw Error("路由 path 必须以 / 开头");
-        if (r.method && !["GET", "POST"].includes(r.method))
-          throw Error("仅支持 GET/POST 路由");
-      }
-    }
-    for (const r of c.resolvers) {
-      if (
-        !httpUrl(r.url) ||
-        !["redirect", "json"].includes(r.mode) ||
-        !Array.isArray(r.platforms)
-      )
-        throw Error("备用取链服务配置不正确");
-    }
-    for (const source of c.lyricSources || []) {
-      if (
-        !source.id ||
-        !httpUrl(source.url) ||
-        typeof source.directories !== "object"
-      )
-        throw Error("社区歌词源配置不正确");
-    }
-    for (const url of Object.values(c.metadataSources || {})) {
-      if (typeof url !== "string" || !httpUrl(url))
-        throw Error("公开元数据库地址不正确");
-    }
+    return validateProviderConfig(c);
   }
   save(c) {
     if (typeof c === "string") c = JSON.parse(c);
     this.validate(c);
     fs.writeFileSync(this.file + ".tmp", JSON.stringify(c, null, 2), "utf8");
     fs.renameSync(this.file + ".tmp", this.file);
+    fs.writeFileSync(
+      this.goodFile + ".tmp",
+      JSON.stringify(c, null, 2),
+      "utf8",
+    );
+    fs.renameSync(this.goodFile + ".tmp", this.goodFile);
+    this.configWarning = "";
     this.config = c;
     this.lyricCache.clear();
     return this.summary();
@@ -296,11 +272,15 @@ export class ProviderRegistry {
       errors: [],
     };
   }
-  async platformLyrics(track) {
+  async platformLyrics(track, { signal } = {}) {
+    signal?.throwIfAborted();
     const p = this.profile(track.platform);
+    const call = (p, op, vars) => this.bridge.call(p, op, vars, { signal });
+    const native = (p, op, vars) => this.bridge.native(p, op, vars, { signal });
+    const json = (url, options) => jsonRequest(url, { ...options, signal });
     let b;
     try {
-      b = await this.bridge.call(
+      b = await call(
         p,
         p.routes.lyricsWord && !p.routes.lyrics.lyricPaths
           ? "lyricsWord"
@@ -314,7 +294,7 @@ export class ProviderRegistry {
     } catch (e) {
       if (track.platform === "qq" && !p.baseUrl) b = {};
       else
-        b = await this.bridge.call(
+        b = await call(
           p,
           "lyrics",
           this.variables(track.platform, {
@@ -330,7 +310,7 @@ export class ProviderRegistry {
       !b.yrc?.lyric &&
       !b.lrc?.lyric
     )
-      b = await this.bridge.call(
+      b = await call(
         p,
         "lyrics",
         this.variables(track.platform, { id: track.id }),
@@ -375,37 +355,31 @@ export class ProviderRegistry {
             track.meta?.songId || (/^\d+$/.test(track.id) ? track.id : 0),
           );
           if (!songID) {
-            const d = await jsonRequest(
-              "https://u.y.qq.com/cgi-bin/musicu.fcg",
-              {
-                method: "POST",
-                body: {
-                  req: {
-                    module: "music.pf_song_detail_svr",
-                    method: "get_song_detail_yqq",
-                    param: { song_mid: track.id },
-                  },
+            const d = await json("https://u.y.qq.com/cgi-bin/musicu.fcg", {
+              method: "POST",
+              body: {
+                req: {
+                  module: "music.pf_song_detail_svr",
+                  method: "get_song_detail_yqq",
+                  param: { song_mid: track.id },
                 },
               },
-            );
+            });
             songID = Number(d.req?.data?.track_info?.id);
           }
           if (songID) {
-            const d = await jsonRequest(
-              "https://u.y.qq.com/cgi-bin/musicu.fcg",
-              {
-                method: "POST",
-                headers: { Referer: "https://y.qq.com/" },
-                body: {
-                  comm: { ct: 19, cv: 1859, uin: "0" },
-                  req: {
-                    module: "music.musichallSong.PlayLyricInfo",
-                    method: "GetPlayLyricInfo",
-                    param: { songID, qrc: 1, trans: 1, roma: 1, crypt: 1 },
-                  },
+            const d = await json("https://u.y.qq.com/cgi-bin/musicu.fcg", {
+              method: "POST",
+              headers: { Referer: "https://y.qq.com/" },
+              body: {
+                comm: { ct: 19, cv: 1859, uin: "0" },
+                req: {
+                  module: "music.musichallSong.PlayLyricInfo",
+                  method: "GetPlayLyricInfo",
+                  param: { songID, qrc: 1, trans: 1, roma: 1, crypt: 1 },
                 },
               },
-            );
+            });
             const q = d.req?.data;
             if (q?.lyric) {
               lines = parseQrcXml(decryptQrc(q.lyric)).filter((l) =>
@@ -425,7 +399,7 @@ export class ProviderRegistry {
     } else {
       const candidate = first(b, ["candidates.0", "data.candidates.0"], null);
       if (candidate) {
-        let raw = await this.bridge.native("kugou", "lyric", {
+        let raw = await native("kugou", "lyric", {
           id: candidate.id,
           accesskey: candidate.accesskey,
           fmt: "krc",
@@ -436,7 +410,7 @@ export class ProviderRegistry {
         format = "krc";
         if (!/^\[\d+,\d+\]/m.test(timed)) {
           timed = "";
-          raw = await this.bridge.native("kugou", "lyric", {
+          raw = await native("kugou", "lyric", {
             id: candidate.id,
             accesskey: candidate.accesskey,
             fmt: "lrc",
@@ -484,7 +458,8 @@ export class ProviderRegistry {
     if (!doc.original) throw Error("当前歌曲没有可用歌词");
     return { ...doc, platform: track.platform };
   }
-  async lyrics(track) {
+  async lyrics(track, { signal } = {}) {
+    signal?.throwIfAborted();
     const source = this.store.data.settings.lyricSource || "auto";
     const key = source + ":" + track.platform + ":" + track.id,
       cached = this.lyricCache.get(key);
@@ -492,7 +467,7 @@ export class ProviderRegistry {
     let doc, error;
     if (source !== "amll")
       try {
-        doc = await this.platformLyrics(track);
+        doc = await this.platformLyrics(track, { signal });
       } catch (e) {
         error = e;
       }
@@ -514,7 +489,9 @@ export class ProviderRegistry {
               id: encodeURIComponent(track.id),
             })
           : `https://raw.githubusercontent.com/amll-dev/amll-ttml-db/refs/heads/main/${dir}/${encodeURIComponent(track.id)}.ttml`;
+        signal?.throwIfAborted();
         const response = await request(endpoint, {
+          signal,
           timeout: Math.min(
             15000,
             Math.max(1000, Number(spec?.timeout) || 5000),
@@ -524,8 +501,9 @@ export class ProviderRegistry {
           await response.body?.cancel();
           throw Error("AMLL 没有收录此歌曲");
         }
-        const text = await response.text();
-        if (text.length > 2 * 1024 * 1024) throw Error("歌词响应过大");
+        const text = (
+          await readBytesLimited(response, 2 * 1024 * 1024)
+        ).toString("utf8");
         const lines = parseTtml(text);
         if (!lines.length) throw Error("社区歌词没有可用时间信息");
         doc = {
@@ -537,14 +515,19 @@ export class ProviderRegistry {
         error ||= e;
       }
     }
+    signal?.throwIfAborted();
     if (!doc) throw Error(errorMessage(error, "当前歌曲没有可用歌词"));
     if (this.lyricCache.size > 100)
       this.lyricCache.delete(this.lyricCache.keys().next().value);
     this.lyricCache.set(key, { time: Date.now(), doc });
     return doc;
   }
-  async resolve(track, quality = "high", purpose = "play") {
+  async resolve(track, quality = "high", purpose = "play", { signal } = {}) {
+    signal?.throwIfAborted();
     const p = this.profile(track.platform);
+    const call = (p, op, vars) => this.bridge.call(p, op, vars, { signal });
+    const json = (url, options) => jsonRequest(url, { ...options, signal });
+    const fetchRequest = (url, options) => request(url, { ...options, signal });
     const errors = [];
     const vars = this.variables(track.platform, {
       ...track.meta,
@@ -558,8 +541,9 @@ export class ProviderRegistry {
     const selected = this.store.data.settings.preferredResolver || "auto";
     if (["auto", "builtin"].includes(selected))
       try {
-        if (track.platform === "kugou") await this.bridge.ensureKugouDevice();
-        b = await this.bridge.call(
+        if (track.platform === "kugou")
+          await this.bridge.ensureKugouDevice({ signal });
+        b = await call(
           p,
           purpose === "download" ? "download" : "resolve",
           vars,
@@ -643,6 +627,7 @@ export class ProviderRegistry {
         }
         throw Error("音频地址为空，可能需要账号权限或接口已变化");
       } catch (e) {
+        signal?.throwIfAborted();
         errors.push(`${p.name}：${e.message}`);
       }
     if (
@@ -666,7 +651,7 @@ export class ProviderRegistry {
             Math.max(1000, Number(r.timeout) || 10000),
           );
           if (r.mode === "json") {
-            const body = await jsonRequest(r.url, {
+            const body = await json(r.url, {
               params,
               headers: r.headers || {},
               timeout,
@@ -705,7 +690,7 @@ export class ProviderRegistry {
                 throw Error("候选音源名称或歌手不匹配，已拒绝");
             }
           } else {
-            const response = await request(r.url, {
+            const response = await fetchRequest(r.url, {
               params,
               headers: r.headers || {},
               timeout,
@@ -728,6 +713,7 @@ export class ProviderRegistry {
             unverifiedDuration: true,
           };
         } catch (e) {
+          signal?.throwIfAborted();
           errors.push(`${r.name}：${e.message}`);
         }
       }

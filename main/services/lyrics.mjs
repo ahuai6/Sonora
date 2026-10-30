@@ -12,19 +12,67 @@ const xml = (s) =>
     .replaceAll('"', "&quot;");
 export function parseLrc(text = "") {
   const offset = Number(String(text).match(/\[offset:([+-]?\d+)\]/i)?.[1] || 0);
-  return String(text)
+  const rows = String(text)
     .split(/\r?\n/)
     .flatMap((row) => {
       const tags = [...row.matchAll(/\[(\d+):(\d+(?:\.\d+)?)\]/g)];
       const body = row.replace(/\[[^\]]*\]/g, "").trim();
-      return tags.map((m) => ({
-        start: Math.max(0, (+m[1] * 60 + +m[2]) * 1000 + offset),
-        text: body.replace(/<\d+:\d+(?:\.\d+)?>/g, ""),
-        words: [],
-      }));
+      const marks = [...body.matchAll(/<(\d+):(\d+(?:\.\d+)?)>/g)];
+      const base = tags.length ? (+tags[0][1] * 60 + +tags[0][2]) * 1000 : 0;
+      return tags.map((m) => {
+        const rawStart = (+m[1] * 60 + +m[2]) * 1000;
+        const words = marks.flatMap((mark, i) => {
+          const next = marks[i + 1],
+            value = body.slice(
+              mark.index + mark[0].length,
+              next?.index ?? body.length,
+            );
+          if (!value) return [];
+          const start =
+            (+mark[1] * 60 + +mark[2]) * 1000 + offset + rawStart - base;
+          const end = next
+            ? (+next[1] * 60 + +next[2]) * 1000 + offset + rawStart - base
+            : undefined;
+          return [{ start: Math.max(0, start), end, text: value }];
+        });
+        return {
+          start: Math.max(0, rawStart + offset),
+          text: body.replace(/<\d+:\d+(?:\.\d+)?>/g, ""),
+          words,
+        };
+      });
     })
     .filter((x) => x.text)
     .sort((a, b) => a.start - b.start);
+  const starts = [...new Set(rows.map((row) => row.start))],
+    nextStart = new Map(starts.map((start, i) => [start, starts[i + 1]]));
+  rows.forEach((row) =>
+    row.words.forEach((w) => {
+      w.end ??= Math.max(w.start, nextStart.get(row.start) ?? w.start + 1500);
+    }),
+  );
+  return rows;
+}
+// Our bilingual LRC convention uses companion lines at the same timestamp.
+export function localLyricDocument(text, source = "本地内嵌歌词") {
+  if (/<tt[\s>]/.test(text))
+    return lyricDocument({ lines: parseTtml(text), source });
+  const groups = new Map();
+  for (const row of parseLrc(text)) {
+    const first = groups.get(row.start);
+    if (!first) groups.set(row.start, { ...row });
+    else if (row.text !== first.text) {
+      if (row.words.length && !first.words.length) {
+        groups.set(row.start, { ...row, translation: first.text });
+      } else if (!first.translation) first.translation = row.text;
+      else
+        first.romanization = [first.romanization, row.text]
+          .filter(Boolean)
+          .join(" / ");
+    }
+  }
+  const lines = [...groups.values()];
+  return lyricDocument({ original: lines.length ? "" : text, lines, source });
 }
 export function parseTimed(text = "", format = "yrc") {
   return String(text)

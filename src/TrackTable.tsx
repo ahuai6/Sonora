@@ -8,6 +8,7 @@ import {
   Trash2,
   ListMinus,
   Tags,
+  MoreHorizontal,
 } from "lucide-react";
 import type { Item } from "./types";
 import { Artwork, PlatformBadge, duration, bytes } from "./ui";
@@ -118,7 +119,10 @@ export default function TrackTable({
           <span className="duration-col">
             {item.duration ? duration(item.duration) : "—"}
           </span>
-          <div className="row-actions">
+          <div
+            className="row-actions"
+            onDoubleClick={(e) => e.stopPropagation()}
+          >
             {local ? (
               <>
                 <button
@@ -140,30 +144,57 @@ export default function TrackTable({
                     fill={item.favorite ? "currentColor" : "none"}
                   />
                 </button>
-                <button
-                  className="icon-button"
-                  aria-label="在文件夹中显示"
-                  title="在文件夹中显示"
-                  onClick={() => onLocal?.(item.id, "reveal")}
+                <details
+                  className="row-more"
+                  onBlur={(e) => {
+                    if (!e.currentTarget.contains(e.relatedTarget as Node))
+                      e.currentTarget.removeAttribute("open");
+                  }}
                 >
-                  <FolderOpen size={16} />
-                </button>
-                <button
-                  className="icon-button"
-                  aria-label="移除音乐库记录"
-                  title="仅移除音乐库记录"
-                  onClick={() => onLocal?.(item.id, "remove")}
-                >
-                  <ListMinus size={16} />
-                </button>
-                <button
-                  className="icon-button danger"
-                  aria-label="音频移入回收站"
-                  title="将音频移入回收站"
-                  onClick={() => onLocal?.(item.id, "trash")}
-                >
-                  <Trash2 size={15} />
-                </button>
+                  <summary
+                    aria-label={`更多 ${item.title} 操作`}
+                    title="更多操作"
+                  >
+                    <MoreHorizontal size={17} />
+                  </summary>
+                  <div
+                    className="row-more-panel"
+                    role="group"
+                    aria-label="更多操作"
+                  >
+                    {[
+                      {
+                        action: "reveal",
+                        label: "在文件夹中显示",
+                        Icon: FolderOpen,
+                      },
+                      {
+                        action: "remove",
+                        label: "移除音乐库记录",
+                        Icon: ListMinus,
+                      },
+                      {
+                        action: "trash",
+                        label: "音频移入回收站",
+                        Icon: Trash2,
+                      },
+                    ].map(({ action, label, Icon }) => (
+                      <button
+                        key={action}
+                        className={action === "trash" ? "danger" : ""}
+                        onClick={(e) => {
+                          e.currentTarget
+                            .closest("details")
+                            ?.removeAttribute("open");
+                          onLocal?.(item.id, action);
+                        }}
+                      >
+                        <Icon size={15} />
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                </details>
               </>
             ) : (
               <>

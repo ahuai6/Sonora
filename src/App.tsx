@@ -1,3 +1,5 @@
+import LrcPanel from "./LrcPanel";
+import { usePlaybackShortcuts } from "./usePlaybackShortcuts";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Search,
@@ -59,7 +61,6 @@ import {
   Busy,
   Modal,
   SectionHeading,
-  parseLyrics,
   weave,
 } from "./ui";
 import Accounts from "./Accounts";
@@ -174,6 +175,7 @@ export default function App() {
       .then((b) => {
         setBoot(b);
         setWelcome(!b.acceptedDisclaimer);
+        if (b.configWarning) notify(b.configWarning, true);
       })
       .catch((e) => setFatal(e.message));
     const off = window.sonora.onDownload((jobs) => {
@@ -212,6 +214,10 @@ export default function App() {
   const setJobs = (downloads: Job[]) =>
     setBoot((b) => (b ? { ...b, downloads } : b));
   const changePage = (p: Page) => {
+    searchGeneration.current++;
+    collectionGeneration.current++;
+    setBusy(false);
+    setCollectionBusy(false);
     if ((p === "search" || p === "lyrics") && p !== page)
       setResults({ items: [], errors: [], hasMore: false });
     setPage(p);
@@ -469,29 +475,14 @@ export default function App() {
       setPlaying(false);
     }
   };
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      const target = e.target as HTMLElement;
-      if (
-        ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName) ||
-        target.isContentEditable
-      )
-        return;
-      if (e.code === "Space" && current) {
-        e.preventDefault();
-        togglePlay();
-      }
-      if ((e.ctrlKey || e.metaKey) && e.key === "f") {
-        e.preventDefault();
-        searchInput.current?.focus();
-      }
-      if (e.key === "Escape") {
-        setLyricPreview(null);
-        setShowQueue(false);
-      }
-    };
-    window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
+  usePlaybackShortcuts({
+    enabled: !!current,
+    onToggle: togglePlay,
+    onSearch: () => searchInput.current?.focus(),
+    onEscape: () => {
+      setLyricPreview(null);
+      setShowQueue(false);
+    },
   });
   async function download(items: Item[]) {
     try {
@@ -584,7 +575,9 @@ export default function App() {
     );
   }, [boot?.library, favorites, libraryQuery, librarySort]);
   const activeDownloads = (boot?.downloads || []).filter((x) =>
-    ["queued", "resolving", "downloading", "tagging"].includes(x.status),
+    ["queued", "resolving", "downloading", "tagging", "committing"].includes(
+      x.status,
+    ),
   ).length;
   const resultList = collection ? collectionItems.items : results.items;
   const cardGrid = (items: Item[], max?: number) => (
@@ -712,7 +705,9 @@ export default function App() {
       </div>
     );
   return (
-    <div className="app-shell">
+    <div
+      className={`app-shell ${boot.settings.density === "compact" ? "compact-density" : ""}`}
+    >
       <audio
         ref={audio}
         onPlay={() => setPlaying(true)}
@@ -839,7 +834,7 @@ export default function App() {
             </button>
           </div>
           <div className="sidebar-foot">
-            SONORA DESKTOP <span>{boot?.version || "1.2.3"}</span>
+            SONORA DESKTOP <span>{boot?.version || "1.3.0"}</span>
           </div>
         </aside>
         <main className="workspace">
@@ -1910,58 +1905,6 @@ export default function App() {
             <ArrowUpRight size={17} />
           </button>
         </Modal>
-      )}
-    </div>
-  );
-}
-function LrcPanel({
-  lyric,
-  position,
-  onSeek,
-}: {
-  lyric: Lyrics | null;
-  position: number;
-  onSeek: (t: number) => void;
-}) {
-  const lines = useMemo(
-    () => parseLyrics(lyric?.original || ""),
-    [lyric?.original],
-  );
-  const active = lines.findLastIndex((x) => x.time <= position);
-  const container = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    const target = container.current?.querySelector<HTMLElement>(
-      '[data-active="true"]',
-    );
-    if (target && container.current)
-      container.current.scrollTo({
-        top:
-          target.offsetTop -
-          container.current.offsetTop -
-          container.current.clientHeight / 2 +
-          target.clientHeight / 2,
-        behavior: "smooth",
-      });
-  }, [active]);
-  return (
-    <div className="lyric-scroll" ref={container}>
-      {lines.length ? (
-        lines.map((l, i) => (
-          <button
-            key={i}
-            className={active === i ? "active" : ""}
-            data-active={active === i}
-            onClick={() => onSeek(l.time)}
-          >
-            {l.text || "♪"}
-          </button>
-        ))
-      ) : (
-        <div className="no-lyrics">
-          <Music2 size={22} />
-          <p>{lyric?.original ? lyric.original : "旋律已经足够动人"}</p>
-          <span>暂无同步歌词</span>
-        </div>
       )}
     </div>
   );

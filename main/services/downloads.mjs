@@ -16,7 +16,9 @@ export class DownloadManager extends EventEmitter {
     this.running = new Map();
     this.stopped = false;
     this.jobs = store.data.downloads.map((j) =>
-      ["queued", "resolving", "downloading", "tagging"].includes(j.status)
+      ["queued", "resolving", "downloading", "tagging", "committing"].includes(
+        j.status,
+      )
         ? j.path && fs.existsSync(j.path)
           ? {
               ...j,
@@ -73,9 +75,13 @@ export class DownloadManager extends EventEmitter {
           (j) =>
             j.track.key === track.key &&
             j.quality === quality &&
-            ["queued", "resolving", "downloading", "tagging"].includes(
-              j.status,
-            ),
+            [
+              "queued",
+              "resolving",
+              "downloading",
+              "tagging",
+              "committing",
+            ].includes(j.status),
         )
       )
         continue;
@@ -103,7 +109,8 @@ export class DownloadManager extends EventEmitter {
     const job = this.jobs.find((x) => x.id === id);
     if (!job) throw Error("下载任务不存在");
     // A committed file is already durable; finish the library update without cancelling it.
-    if (job.status === "tagging" && job.path) return this.publicJobs();
+    if (job.status === "committing" || (job.status === "tagging" && job.path))
+      return this.publicJobs();
     if (
       action === "retry" &&
       ["failed", "paused", "cancelled"].includes(job.status)
@@ -120,7 +127,9 @@ export class DownloadManager extends EventEmitter {
       });
     } else if (
       action === "pause" &&
-      ["queued", "resolving", "downloading", "tagging"].includes(job.status)
+      ["queued", "resolving", "downloading", "tagging", "committing"].includes(
+        job.status,
+      )
     ) {
       job.status = "paused";
       job.message = "已暂停，继续时重新下载";
@@ -131,7 +140,9 @@ export class DownloadManager extends EventEmitter {
       this.running.get(id)?.abort();
     } else if (
       action === "remove" &&
-      !["resolving", "downloading", "tagging"].includes(job.status)
+      !["resolving", "downloading", "tagging", "committing"].includes(
+        job.status,
+      )
     ) {
       this.jobs = this.jobs.filter((j) => j.id !== id);
     }
@@ -173,6 +184,7 @@ export class DownloadManager extends EventEmitter {
         job.track,
         job.quality,
         "download",
+        { signal: controller.signal },
       );
       controller.signal.throwIfAborted();
       if (audio.trial) throw Error("该音源仅返回试听片段，未下载");
@@ -312,6 +324,7 @@ export class DownloadManager extends EventEmitter {
         job.metadata = { status: "disabled", warnings: [] };
       }
       controller.signal.throwIfAborted();
+      job.status = "committing";
       job.message = "正在保存音频并更新音乐库";
       this.publish();
       completedFile = await uniqueCommit(

@@ -241,8 +241,8 @@ export class TagEditor {
     }
     if (
       input.lyrics !== undefined &&
-      saved.lyrics.replace(/\r\n/g, "\n") !==
-        input.lyrics.replace(/\r\n/g, "\n")
+      saved.lyrics.replace(/\r\n/g, "\n").trimEnd() !==
+        input.lyrics.replace(/\r\n/g, "\n").trimEnd()
     )
       throw Error("此格式未能保存内嵌歌词，原文件未修改");
     if (
@@ -360,11 +360,18 @@ export class TagEditor {
         path.join(this.backupDir, backup),
         fs.constants.COPYFILE_EXCL,
       );
-      // Keep a recoverable original before replacing the validated temporary file.
+      // The durable backup exists before replacement; publish its pointer only on success.
+      try {
+        await replaceFileWithRetry(temp, file, expectedRevision);
+      } catch (e) {
+        await fs.promises
+          .unlink(path.join(this.backupDir, backup))
+          .catch(() => {});
+        throw e;
+      }
       this.store.data.tagBackups ||= {};
       this.store.data.tagBackups[id] = backup;
       this.store.save();
-      await replaceFileWithRetry(temp, file, expectedRevision);
       const result = await this.library.importFiles([file], { force: true });
       return { items: result.items, editor: await this.read(id) };
     } finally {
