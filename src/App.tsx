@@ -425,8 +425,8 @@ export default function App() {
     }
   }
   async function accountPlaylists(p: Platform, next = 1) {
-    const gen = ++collectionGeneration.current;
     if (next === 1) changePage("accounts");
+    const gen = ++collectionGeneration.current;
     setCollection({
       id: "account",
       key: "account:" + p,
@@ -440,12 +440,14 @@ export default function App() {
       meta: {},
     });
     setCollectionBusy(true);
-    setCollectionPage(next);
-    if (next === 1)
+    if (next === 1) {
+      setCollectionPage(1);
       setCollectionItems({ items: [], errors: [], hasMore: false });
+    }
     try {
       const result = await window.sonora.accountPlaylists(p, next);
-      if (gen === collectionGeneration.current)
+      if (gen === collectionGeneration.current) {
+        setCollectionPage(next);
         setCollectionItems((previous) => ({
           ...result,
           items:
@@ -457,12 +459,13 @@ export default function App() {
                   ).values(),
                 ],
         }));
+      }
     } catch (e) {
-      setCollectionItems({
-        items: [],
-        hasMore: false,
-        errors: [{ platform: p, message: (e as Error).message }],
-      });
+      if (gen === collectionGeneration.current)
+        setCollectionItems((previous) => ({
+          ...previous,
+          errors: [{ platform: p, message: (e as Error).message }],
+        }));
     } finally {
       if (gen === collectionGeneration.current) setCollectionBusy(false);
     }
@@ -1020,6 +1023,7 @@ export default function App() {
                         setCollection(null);
                         setSelected(new Set());
                         collectionGeneration.current++;
+                        setCollectionBusy(false);
                       }}
                     >
                       <ArrowLeft size={16} />

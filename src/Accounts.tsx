@@ -19,7 +19,7 @@ import { Modal, PlatformBadge, platformNames, Empty } from "./ui";
 type Props = {
   accounts: Account[];
   onAccounts: (a: Account[]) => void;
-  onPlaylists: (p: Platform) => void;
+  onPlaylists: (p: Platform) => void | Promise<void>;
   notify: (s: string, error?: boolean) => void;
 };
 export default function Accounts({
@@ -104,14 +104,18 @@ export default function Accounts({
               <button
                 className="button secondary compact"
                 onClick={async () => {
-                  if (!a.active)
-                    onAccounts(
-                      await window.sonora.saveAccount({
-                        activate: true,
-                        id: a.id,
-                      }),
-                    );
-                  onPlaylists(a.platform);
+                  try {
+                    if (!a.active)
+                      onAccounts(
+                        await window.sonora.saveAccount({
+                          activate: true,
+                          id: a.id,
+                        }),
+                      );
+                    await onPlaylists(a.platform);
+                  } catch (e) {
+                    notify((e as Error).message, true);
+                  }
                 }}
               >
                 <FolderHeart size={15} />
