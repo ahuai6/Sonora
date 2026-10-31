@@ -1,3 +1,7 @@
+import { WorkspaceTools, redact } from "./services/workspace-tools.mjs";
+import { FileTransactions } from "./services/file-transactions.mjs";
+import { LibraryWatch } from "./services/library-watch.mjs";
+import { probeAudio } from "./services/audio-info.mjs";
 import { stopSdkWorkers } from "./providers/sdk-client.mjs";
 import {
   app,
@@ -12,6 +16,7 @@ import {
   nativeImage,
 } from "electron";
 import fs from "node:fs";
+import { randomUUID } from "node:crypto";
 import path from "node:path";
 import os from "node:os";
 import { fileURLToPath } from "node:url";
@@ -20,7 +25,7 @@ import { ProviderRegistry } from "./providers/registry.mjs";
 import { MusicLibrary, writeUniqueText } from "./services/files.mjs";
 import { DownloadManager } from "./services/downloads.mjs";
 import { MediaService } from "./services/media.mjs";
-import { PLATFORMS, safeName, httpUrl } from "./core/models.mjs";
+import { PLATFORMS, QUALITY, safeName, httpUrl } from "./core/models.mjs";
 import { joinCookies } from "./providers/engines.mjs";
 import { errorMessage } from "./core/errors.mjs";
 import {
@@ -64,7 +69,46 @@ if (!app.requestSingleInstanceLock()) {
     media,
     tagEditor,
     metadataMatcher;
-  let collections;
+  let collections, workspace, watcher;
+  const transactions = new FileTransactions(),
+    errors = [],
+    mutations = new Set();
+  async function suspendMutation(file) {
+    const unlock = await transactions.acquire(file);
+    try {
+      const resume = await media.suspendFile(file);
+      return () => {
+        resume();
+        unlock();
+      };
+    } catch (e) {
+      unlock();
+      throw e;
+    }
+  }
+  function diagnosticSnapshot() {
+    return redact({
+      version: app.getVersion(),
+      runtime: {
+        electron: process.versions.electron,
+        node: process.versions.node,
+        os: os.release(),
+      },
+      providers: providers.summary(),
+      resolvers: [...providers.resolverHealth.entries()].map(
+        ([id, health]) => ({ id, ...health }),
+      ),
+      errors,
+      downloads: downloads.jobs.map((j) => ({
+        platform: j.track.platform,
+        status: j.status,
+        stage: j.failureStage,
+        quality: j.audioInfo,
+        message: j.message,
+        warnings: j.metadata?.warnings,
+      })),
+    });
+  }
   const logins = new Map();
   let shuttingDown = false;
   app.on("second-instance", () => {
@@ -105,8 +149,35 @@ if (!app.requestSingleInstanceLock()) {
       )
         throw Error("无效的调用来源");
       try {
-        return await fn(...args);
+        const task = Promise.resolve(fn(...args));
+        const mutating =
+          [
+            "tagSave",
+            "tagSaveCopy",
+            "tagRestore",
+            "scanLibrary",
+            "importMusic",
+            "libraryAction",
+            "collectionBatch",
+            "refreshFiles",
+          ].includes(name) ||
+          (name === "workspace" &&
+            [
+              "batchApply",
+              "restoreBackup",
+              "relink",
+              "importList",
+              "retryMetadata",
+            ].includes(args[0]));
+        if (mutating) mutations.add(task);
+        try {
+          return await task;
+        } finally {
+          mutations.delete(task);
+        }
       } catch (e) {
+        errors.push({ at: Date.now(), action: name, message: errorMessage(e) });
+        if (errors.length > 200) errors.shift();
         throw Error(errorMessage(e));
       }
     });
@@ -114,7 +185,9 @@ if (!app.requestSingleInstanceLock()) {
   function snapshot() {
     return {
       version: app.getVersion(),
-      configWarning: providers.configWarning,
+      configWarning: [providers.configWarning, store.recoveryWarning]
+        .filter(Boolean)
+        .join("；"),
       settings: store.data.settings,
       accounts: store.publicAccounts(),
       downloads: downloads.publicJobs(),
@@ -134,6 +207,185 @@ if (!app.requestSingleInstanceLock()) {
   }
   function installIPC() {
     bind("bootstrap", snapshot);
+    bind("workspace", async (action, input = {}) => {
+      if (!input || typeof input !== "object") throw Error("操作参数不正确");
+      if (action === "recovery") return workspace.recovery();
+      if (action === "cleanup")
+        return workspace.cleanup(Array.isArray(input.names) ? input.names : []);
+      if (action === "restoreBackup")
+        return workspace.restoreBackup(input.name, input.id);
+      if (action === "missing") return store.data.missingLibrary || [];
+      if (action === "forgetMissing") {
+        store.data.missingLibrary = (store.data.missingLibrary || []).filter(
+          (x) => !input.ids.includes(x.id),
+        );
+        store.save();
+        return store.data.missingLibrary;
+      }
+      if (action === "relink") {
+        const r = await dialog.showOpenDialog(win, {
+          title: "重新定位音频",
+          properties: ["openFile"],
+        });
+        if (r.canceled) return null;
+        const items = await workspace.relink(input.id, r.filePaths[0]);
+        win.webContents.send("sonora:library", items);
+        return items;
+      }
+      if (action === "batchPlan")
+        return workspace.plan(input.ids, input.source || "all");
+      if (action === "batchApply") {
+        const r = await workspace.apply(
+          input.planId,
+          input.choices,
+          input.options,
+        );
+        win.webContents.send("sonora:library", r.items);
+        return r;
+      }
+      if (action === "queueLoad") return store.data.playback || null;
+      if (action === "savedLists") return store.data.savedLists;
+      if (action === "loadSavedList")
+        return (
+          store.data.savedLists.find((x) => x.id === input.id)?.items || []
+        );
+      if (action === "queueSave") {
+        if (!Array.isArray(input.queue) || input.queue.length > 5000)
+          throw Error("队列最多 5000 首");
+        const queue = input.queue
+          .filter(
+            (t) =>
+              t?.platform !== "local" ||
+              library.list().some((x) => x.id === t.id),
+          )
+          .map((t) =>
+            t.platform === "local" ? library.known(t.id) : knownTrack(t),
+          );
+        store.data.playback = {
+          queue,
+          current: queue.find((x) => x.key === input.current)?.key || "",
+          position: Math.max(0, Number(input.position) || 0),
+          volume: Math.max(0, Math.min(1, Number(input.volume) || 0)),
+          mode: ["loop", "one", "shuffle"].includes(input.mode)
+            ? input.mode
+            : "loop",
+        };
+        store.save();
+        return store.data.playback;
+      }
+      if (action === "lyricPreview") {
+        if (typeof input.text !== "string" || input.text.length > 1024 * 1024)
+          throw Error("歌词过长");
+        return workspace.lyrics(input.text, input.format || "auto");
+      }
+      if (action === "lyricExport") {
+        const result = workspace.lyrics(input.text, input.format || "auto");
+        if (result.errors.length) throw Error(result.errors.join("；"));
+        const r = await dialog.showSaveDialog(win, {
+          title: "导出编辑后的歌词",
+          defaultPath: "lyrics." + result.exported.extension,
+        });
+        if (r.canceled) return null;
+        await fs.promises.writeFile(r.filePath, result.exported.text, "utf8");
+        return r.filePath;
+      }
+      if (action === "exportList") {
+        const items =
+          input.scope === "collection"
+            ? Array.isArray(input.items)
+              ? input.items.slice(0, 5000).map(knownTrack)
+              : []
+            : input.scope === "queue"
+              ? store.data.playback?.queue || []
+              : input.scope === "downloads"
+                ? downloads.jobs
+                    .filter((x) => x.path)
+                    .map((x) => ({ ...x.track, path: x.path }))
+                : library
+                    .list()
+                    .filter(
+                      (x) => !input.ids?.length || input.ids.includes(x.id),
+                    );
+        const format = ["json", "csv", "m3u8"].includes(input.format)
+          ? input.format
+          : "json";
+        const r = await dialog.showSaveDialog(win, {
+          title: "导出音乐列表",
+          defaultPath: "Sonora-list." + format,
+        });
+        if (r.canceled) return null;
+        await fs.promises.writeFile(
+          r.filePath,
+          "\ufeff" + workspace.exportList(items, format),
+          "utf8",
+        );
+        return r.filePath;
+      }
+      if (action === "importList") {
+        const r = await dialog.showOpenDialog(win, {
+          title: "导入音乐列表",
+          properties: ["openFile"],
+          filters: [
+            { name: "音乐列表", extensions: ["json", "csv", "m3u8", "m3u"] },
+          ],
+        });
+        if (r.canceled) return null;
+        const file = r.filePaths[0];
+        const stat = await fs.promises.stat(file);
+        if (stat.size > 10 * 1024 * 1024) throw Error("列表超过 10 MB");
+        const result = await workspace.importList(
+          (await fs.promises.readFile(file, "utf8")).replace(/^\ufeff/, ""),
+          path.extname(file).slice(1),
+          path.dirname(file),
+        );
+        if (result.remote.length) {
+          store.data.savedLists.unshift({
+            id: randomUUID(),
+            name: path.basename(file, path.extname(file)),
+            items: result.remote,
+            createdAt: Date.now(),
+          });
+          store.data.savedLists = store.data.savedLists.slice(0, 100);
+          store.save();
+        }
+        win.webContents.send("sonora:library", result.items);
+        return result;
+      }
+      if (action === "retryMetadata") return downloads.retryMetadata(input.ids);
+      if (action === "restoreState") {
+        const entry = (await workspace.recovery()).files.find(
+          (x) => x.kind === "state" && x.name === input.name,
+        );
+        if (!entry) throw Error("备份不存在");
+        const content = await fs.promises.readFile(
+            path.join(store.dir, entry.name),
+            "utf8",
+          ),
+          value = JSON.parse(content);
+        if (
+          !value ||
+          typeof value !== "object" ||
+          !Array.isArray(value.library)
+        )
+          throw Error("备份格式无效");
+        if (downloads.running.size) throw Error("请先暂停所有下载再恢复状态");
+        await downloads.stop();
+        await fs.promises.copyFile(
+          store.file,
+          store.file + ".corrupt-" + Date.now(),
+        );
+        await fs.promises.writeFile(store.file + ".restore", content);
+        await fs.promises.rename(store.file + ".restore", store.file);
+        shuttingDown = true;
+        watcher.close();
+        stopSdkWorkers();
+        app.relaunch();
+        app.quit();
+        return true;
+      }
+      if (action === "diagnostics") return diagnosticSnapshot();
+      throw Error("未知工具操作");
+    });
     bind("search", (query) => providers.search(query));
     bind("charts", (platform) => providers.browse(platform, "charts"));
     bind("recommend", (platform) => providers.browse(platform, "recommend"));
@@ -150,7 +402,19 @@ if (!app.requestSingleInstanceLock()) {
         limit: 50,
       });
     });
+    bind("probeAudio", async (mediaUrl) => {
+      const parsed = new URL(mediaUrl);
+      if (parsed.protocol !== "sonora-media:" || parsed.hostname !== "audio")
+        throw Error("无效音频来源");
+      const source = media.entries.get(parsed.pathname.slice(1));
+      if (!source) throw Error("音频来源已过期");
+      return probeAudio(source);
+    });
     bind("resolve", async (track, quality) => {
+      quality =
+        quality ||
+        store.data.settings.qualityPreferences?.[track?.platform] ||
+        store.data.settings.quality;
       if (track?.platform === "local") {
         const local = library.known(track.id);
         const mime =
@@ -166,9 +430,7 @@ if (!app.requestSingleInstanceLock()) {
         return {
           mediaUrl: media.register({ path: local.path, mime }),
           source: "本地音乐",
-          quality: local.bitrate
-            ? Math.round(local.bitrate / 1000) + " kbps"
-            : local.format,
+          quality: local.audioInfo?.label || "音质待音频确认",
           trial: false,
         };
       }
@@ -228,10 +490,15 @@ if (!app.requestSingleInstanceLock()) {
     bind("download", (tracks, quality) => {
       if (!Array.isArray(tracks) || tracks.length > 300)
         throw Error("一次最多下载 300 首");
-      return downloads.add(
-        tracks.map(knownTrack),
-        quality || store.data.settings.quality,
-      );
+      let added = 0;
+      for (const track of tracks.map(knownTrack))
+        added += downloads.add(
+          [track],
+          store.data.settings.qualityPreferences?.[track.platform] ||
+            quality ||
+            store.data.settings.quality,
+        ).added;
+      return { added, jobs: downloads.publicJobs() };
     });
     bind("downloadAction", (id, action) => downloads.action(id, action));
     bind("refreshFiles", async () => {
@@ -248,7 +515,13 @@ if (!app.requestSingleInstanceLock()) {
     bind("scanLibrary", async (folder) => {
       if (!folder) folder = await pickDirectory("扫描本地音乐文件夹");
       if (!folder) return null;
-      return library.scan(folder);
+      const result = await library.scan(folder);
+      store.data.watchFolders = [
+        ...new Set([...(store.data.watchFolders || []), folder]),
+      ].slice(0, 30);
+      store.save();
+      watcher.watch(folder);
+      return result;
     });
     bind("importMusic", async () => {
       const r = await dialog.showOpenDialog(win, {
@@ -268,6 +541,8 @@ if (!app.requestSingleInstanceLock()) {
               "ape",
               "aiff",
               "wma",
+              "dsf",
+              "dff",
             ],
           },
         ],
@@ -364,11 +639,46 @@ if (!app.requestSingleInstanceLock()) {
           patch.downloadDir.includes("\0"))
       )
         throw Error("下载目录必须为绝对路径");
-      if (
-        patch.quality &&
-        !["standard", "high", "lossless", "hires"].includes(patch.quality)
-      )
+      if (patch.quality && !Object.hasOwn(QUALITY, patch.quality))
         throw Error("音质设置不正确");
+      for (const key of ["qualityPreferences", "resolverPreferences"])
+        if (patch[key] !== undefined) {
+          if (
+            !patch[key] ||
+            typeof patch[key] !== "object" ||
+            Array.isArray(patch[key])
+          )
+            throw Error("平台偏好不正确");
+          for (const [platform, value] of Object.entries(patch[key]))
+            if (
+              !PLATFORMS.includes(platform) ||
+              typeof value !== "string" ||
+              (key === "qualityPreferences" &&
+                value &&
+                !Object.hasOwn(QUALITY, value))
+            )
+              throw Error("平台偏好不正确");
+        }
+      if (patch.resolverOrder !== undefined) {
+        if (
+          !patch.resolverOrder ||
+          typeof patch.resolverOrder !== "object" ||
+          Array.isArray(patch.resolverOrder)
+        )
+          throw Error("音源优先级不正确");
+        for (const [platform, order] of Object.entries(patch.resolverOrder))
+          if (
+            !PLATFORMS.includes(platform) ||
+            !Array.isArray(order) ||
+            order.length > 30 ||
+            order.some(
+              (id) =>
+                id !== "builtin" &&
+                !providers.config.resolvers.some((r) => r.id === id),
+            )
+          )
+            throw Error("音源优先级不正确");
+      }
       return store.setSettings(patch);
     });
     bind("saveAccount", async (account) => {
@@ -431,16 +741,12 @@ if (!app.requestSingleInstanceLock()) {
       const loginSession = session.fromPartition(partition);
       loginSession.setPermissionRequestHandler((_wc, _p, cb) => cb(false));
       if (collect) {
-        const domains = {
-          netease: "music.163.com",
-          qq: "y.qq.com",
-          kugou: "kugou.com",
-        };
-        const cookies = (await loginSession.cookies.get({})).filter(
-          (c) =>
-            c.domain.replace(/^\./, "") === domains[platform] ||
-            c.domain.endsWith("." + domains[platform]),
-        );
+        const origin = {
+          netease: "https://music.163.com/",
+          qq: "https://y.qq.com/",
+          kugou: "https://www.kugou.com/",
+        }[platform];
+        const cookies = await loginSession.cookies.get({ url: origin });
         const cookie = cookies.map((c) => `${c.name}=${c.value}`).join("; ");
         const required = {
           netease: ["MUSIC_U"],
@@ -549,26 +855,7 @@ if (!app.requestSingleInstanceLock()) {
         filters: [{ name: "JSON", extensions: ["json"] }],
       });
       if (r.canceled) return null;
-      const info = {
-        version: app.getVersion(),
-        runtime: {
-          electron: process.versions.electron,
-          node: process.versions.node,
-          os: os.release(),
-          arch: process.arch,
-        },
-        at: new Date().toISOString(),
-        providers: providers.summary().map((p) => ({
-          ...p,
-          baseUrl: p.baseUrl ? new URL(p.baseUrl).origin : "",
-        })),
-        downloads: downloads.jobs.map((j) => ({
-          platform: j.track.platform,
-          status: j.status,
-          received: j.received,
-          total: j.total,
-        })),
-      };
+      const info = diagnosticSnapshot();
       await fs.promises.writeFile(
         r.filePath,
         JSON.stringify(info, null, 2),
@@ -595,7 +882,7 @@ if (!app.requestSingleInstanceLock()) {
   );
   library = new MusicLibrary(store);
   tagEditor = new TagEditor(store, library, {
-    beforeWrite: (file) => media.suspendFile(file),
+    beforeWrite: suspendMutation,
   });
   metadataMatcher = new MetadataMatcher(providers, library);
   downloads = new DownloadManager(store, providers, library, {
@@ -620,8 +907,29 @@ if (!app.requestSingleInstanceLock()) {
         })
       ).response === 1,
     trashFile: (file) => shell.trashItem(file),
-    suspendFile: (file) => media.suspendFile(file),
+    suspendFile: suspendMutation,
   });
+  workspace = new WorkspaceTools(
+    store,
+    library,
+    tagEditor,
+    metadataMatcher,
+    downloads,
+    async (url) => {
+      if (!url) return null;
+      const result = await fetchArtwork(url, nativeImage);
+      return result;
+    },
+  );
+  watcher = new LibraryWatch(library, (items) => {
+    if (win && !win.isDestroyed())
+      win.webContents.send("sonora:library", items);
+  });
+  for (const folder of [
+    ...(store.data.watchFolders || []),
+    store.data.settings.downloadDir,
+  ])
+    watcher.watch(folder);
   protocol.handle("sonora-media", (request) => media.handle(request));
   win = new BrowserWindow({
     width: 1360,
@@ -669,11 +977,19 @@ if (!app.requestSingleInstanceLock()) {
           win.webContents.send("sonora:library", r.items);
       })
       .catch(() => {});
-  app.on("before-quit", () => {
+  app.on("before-quit", (event) => {
     if (!shuttingDown) {
+      event.preventDefault();
       shuttingDown = true;
-      downloads.stop();
-      stopSdkWorkers();
+      watcher.close();
+      workspace.closed = true;
+      Promise.allSettled([downloads.stop(), ...mutations])
+        .then(() => library.importQueue)
+        .catch(() => {})
+        .finally(() => {
+          stopSdkWorkers();
+          app.quit();
+        });
     }
   });
   app.on("window-all-closed", () => app.quit());

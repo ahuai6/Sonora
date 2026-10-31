@@ -1,3 +1,4 @@
+import { supportsQuality, QQ_FILES } from "./quality.mjs";
 import { validateProviderConfig } from "./config.mjs";
 import { mergeBundledResolvers } from "./migrations.mjs";
 import fs from "node:fs";
@@ -31,6 +32,7 @@ export class ProviderRegistry {
     this.bridge = new EngineBridge(store);
     this.authSessions = new Map();
     this.lyricCache = new Map();
+    this.resolverHealth = new Map();
     this.reload();
   }
   reload() {
@@ -120,7 +122,10 @@ export class ProviderRegistry {
       page: 1,
       limit: 30,
       offset: 0,
-      uid: this.store.credential(id).uid || "",
+      uid:
+        (this.store.account
+          ? this.store.account(id)?.uid
+          : this.store.credential(id).uid) || "",
       duration: 0,
       albumId: "",
       albumAudioId: "",
@@ -531,8 +536,51 @@ export class ProviderRegistry {
     this.lyricCache.set(key, { time: Date.now(), doc });
     return doc;
   }
-  async resolve(track, quality = "high", purpose = "play", { signal } = {}) {
+  async resolve(
+    track,
+    quality = "high",
+    purpose = "play",
+    { signal, resolver } = {},
+  ) {
     signal?.throwIfAborted();
+    if (resolver === undefined) {
+      const settings = this.store.data.settings;
+      const selected =
+        settings.resolverPreferences?.[track.platform] ||
+        settings.preferredResolver ||
+        "auto";
+      if (selected !== "auto")
+        return this.resolve(track, quality, purpose, {
+          signal,
+          resolver: selected,
+        });
+      const available = [
+        "builtin",
+        ...(settings.usePublicFallback
+          ? this.config.resolvers
+              .filter((x) => x.enabled && x.platforms.includes(track.platform))
+              .map((x) => x.id)
+          : []),
+      ];
+      const order = [
+        ...new Set([
+          ...(settings.resolverOrder?.[track.platform] || []),
+          ...available,
+        ]),
+      ].filter((id) => available.includes(id));
+      const failures = [];
+      for (const id of order)
+        try {
+          return await this.resolve(track, quality, purpose, {
+            signal,
+            resolver: id,
+          });
+        } catch (e) {
+          signal?.throwIfAborted();
+          failures.push(e.message);
+        }
+      throw Error(failures.join("；") || "没有启用的音源");
+    }
     const p = this.profile(track.platform);
     const call = (p, op, vars) => this.bridge.call(p, op, vars, { signal });
     const json = (url, options) => jsonRequest(url, { ...options, signal });
@@ -546,17 +594,26 @@ export class ProviderRegistry {
       freePart: purpose === "play" ? 1 : 0,
     });
     let b;
-    const route = p.routes[purpose === "download" ? "download" : "resolve"];
-    const selected = this.store.data.settings.preferredResolver || "auto";
+    const operation =
+      track.platform === "netease" &&
+      purpose === "download" &&
+      p.routes.download.module === "song_download_url"
+        ? "resolve"
+        : purpose === "download"
+          ? "download"
+          : "resolve";
+    const route = p.routes[operation];
+    const selected = resolver;
     if (["auto", "builtin"].includes(selected))
       try {
         if (track.platform === "kugou")
           await this.bridge.ensureKugouDevice({ signal });
-        b = await call(
-          p,
-          purpose === "download" ? "download" : "resolve",
-          vars,
-        );
+        if (!supportsQuality(track.platform, quality))
+          throw Error("该平台没有此音质档位，请在设置中选择此平台的音质");
+        b =
+          track.platform === "qq" && QQ_FILES[quality] && !p.baseUrl
+            ? await this.bridge.qqExtended(track, quality, { signal })
+            : await call(p, operation, vars);
         const source =
           track.platform === "netease"
             ? Array.isArray(b.data)
@@ -625,8 +682,8 @@ export class ProviderRegistry {
             source: p.name + (p.baseUrl ? " · 自建接口" : " · 内置接口"),
             trial,
             quality: br
-              ? `${Math.round(br > 5000 ? br / 1000 : br)} kbps`
-              : QUALITY[quality]?.label || "源站音质",
+              ? `接口报告 ${Math.round(br > 5000 ? br / 1000 : br)} kbps`
+              : "音质待音频确认",
             bytes: Number(
               route.sizePaths
                 ? first(b, route.sizePaths, 0)
@@ -649,6 +706,7 @@ export class ProviderRegistry {
           x.platforms.includes(track.platform) &&
           (selected === "auto" || selected === x.id),
       )) {
+        const started = Date.now();
         try {
           const params = renderTemplate(r.params, vars);
           let url,
@@ -710,6 +768,12 @@ export class ProviderRegistry {
             await response.body?.cancel();
           }
           if (!httpUrl(url)) throw Error("没有返回音频地址");
+          this.resolverHealth.set(r.id, {
+            ok: true,
+            checkedAt: Date.now(),
+            latency: Date.now() - started,
+            message: "取链成功",
+          });
           return {
             url: httpUrl(url),
             headers: {},
@@ -723,6 +787,12 @@ export class ProviderRegistry {
           };
         } catch (e) {
           signal?.throwIfAborted();
+          this.resolverHealth.set(r.id, {
+            ok: false,
+            checkedAt: Date.now(),
+            latency: Date.now() - started,
+            message: e.message,
+          });
           errors.push(`${r.name}：${e.message}`);
         }
       }
@@ -851,10 +921,12 @@ export class ProviderRegistry {
     let verified = false;
     uid = String(uid || c.userid || c.uin || c.wxuin || "").replace(/^o/, "");
     try {
-      const sdk = await import("./engines.mjs").then((x) => x.engine(platform));
+      const bounded = AbortSignal.timeout(18000);
       let b;
       if (platform === "netease") {
-        b = unwrap(await sdk.login_status({ cookie }));
+        b = unwrap(
+          await this.bridge.verifyAccount(platform, cookie, uid, bounded),
+        );
         const profile = b.data?.profile || b.profile;
         if (profile) {
           uid = String(profile.userId);
@@ -863,10 +935,7 @@ export class ProviderRegistry {
         }
       } else if (platform === "kugou") {
         b = unwrap(
-          await sdk.user_detail({
-            cookie: { ...this.store.data.device, ...c },
-            userid: uid,
-          }),
+          await this.bridge.verifyAccount(platform, cookie, uid, bounded),
         );
         if (b.status === 1 && b.data) {
           nickname = first(
@@ -877,7 +946,9 @@ export class ProviderRegistry {
           verified = !!nickname;
         }
       } else {
-        b = unwrap(await sdk.getUserDetail({ uin: uid, cookie }));
+        b = unwrap(
+          await this.bridge.verifyAccount(platform, cookie, uid, bounded),
+        );
         nickname = first(b, ["data.nickname", "nickname", "creator.nick"], "");
         verified = !!nickname;
       }

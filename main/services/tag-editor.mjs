@@ -1,3 +1,4 @@
+import { Worker, isMainThread } from "node:worker_threads";
 import fs from "node:fs";
 import path from "node:path";
 import { randomUUID, createHash } from "node:crypto";
@@ -196,6 +197,22 @@ export class TagEditor {
     );
   }
   async writeTags(temp, input) {
+    if (isMainThread)
+      return new Promise((resolve, reject) => {
+        const worker = new Worker(
+          new URL("./tag-worker.mjs", import.meta.url),
+          { workerData: { file: temp, input } },
+        );
+        let settled = false;
+        worker.once("message", (result) => {
+          settled = true;
+          result.error ? reject(Error(result.error)) : resolve();
+        });
+        worker.once("error", reject);
+        worker.once("exit", (code) => {
+          if (!settled) reject(Error("标签写入进程意外退出 (" + code + ")"));
+        });
+      });
     const f = File.createFromPath(temp);
     try {
       if (!f.isWritable || f.isPossiblyCorrupt)

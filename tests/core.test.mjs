@@ -122,7 +122,7 @@ test("audio response paths can be changed entirely through provider configuratio
     "lossless",
   );
   assert.equal(result.url, "https://example.com/new.flac");
-  assert.equal(result.quality, "900 kbps");
+  assert.equal(result.quality, "接口报告 900 kbps");
   assert.equal(result.trial, false);
 });
 test("lyric JSON paths can be changed without changing platform adapters", async () => {
@@ -386,7 +386,7 @@ test("registry resolves scalar native audio URLs without truncating to first cha
     "high",
   );
   assert.equal(v.url, "https://example.com/song.mp3");
-  assert.equal(v.quality, "320 kbps");
+  assert.equal(v.quality, "接口报告 320 kbps");
 });
 test("public fallback receives no account cookie", async (t) => {
   let cookie;

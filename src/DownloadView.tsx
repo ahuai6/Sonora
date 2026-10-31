@@ -268,7 +268,11 @@ export default function DownloadView({
               <div className="download-info">
                 <div className="download-name">
                   <strong title={j.track.title}>{j.track.title}</strong>
-                  <span>{qualityNames[j.quality]}</span>
+                  <span>请求：{qualityNames[j.quality]}</span>
+                  <span className="download-quality" title={j.actualQuality}>
+                    实际：
+                    {j.audioInfo?.label || j.actualQuality || "等待音频检测"}
+                  </span>
                 </div>
                 <div className="download-sub">
                   <span>{j.track.artist}</span>
@@ -335,6 +339,31 @@ export default function DownloadView({
                     onClick={() => action(j.id, "retry")}
                   >
                     <RotateCcw size={17} />
+                  </button>
+                )}
+                {j.status === "completed" && (
+                  <button
+                    className="icon-button"
+                    title="只重试标签和歌词，不重复下载"
+                    aria-label="重试内嵌信息"
+                    disabled={batchBusy}
+                    onClick={async () => {
+                      setBatchBusy(true);
+                      try {
+                        onChange(
+                          await window.sonora.workspace("retryMetadata", {
+                            ids: [j.id],
+                          }),
+                        );
+                        notify("内嵌信息已重新处理");
+                      } catch (e) {
+                        notify((e as Error).message, true);
+                      } finally {
+                        setBatchBusy(false);
+                      }
+                    }}
+                  >
+                    <RotateCcw size={16} />
                   </button>
                 )}
                 {j.status === "completed" ? (

@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import ResolverPriority from "./ResolverPriority";
 import {
   FolderOpen,
   SlidersHorizontal,
@@ -16,11 +17,15 @@ import type { Settings as SettingsType, Provider, Platform } from "./types";
 import { Toggle, platformNames, qualityNames } from "./ui";
 export default function Settings({
   settings,
+  version,
+  onTools,
   onSettings,
   onProviders,
   notify,
 }: {
   settings: SettingsType;
+  version: string;
+  onTools: (tab: string) => void;
   onSettings: (s: SettingsType) => void;
   onProviders: (p: Provider[]) => void;
   notify: (s: string, error?: boolean) => void;
@@ -229,6 +234,7 @@ export default function Settings({
           </div>
           <select
             value={settings.theme}
+            aria-label="界面外观"
             onChange={(e) =>
               change({ theme: e.target.value as SettingsType["theme"] })
             }
@@ -458,6 +464,95 @@ export default function Settings({
           </>
         )}
       </section>
+      <section className="settings-section">
+        <h2>平台独立音质与音源</h2>
+        <p className="tag-note">
+          默认音质适用于未单独设置的平台。母带、全景声与 DSD
+          由发行规格和账号权益决定；空间音效不代表位深或采样率更高。DSD
+          文件可下载和管理，系统播放器可能无法预览。
+        </p>
+        {(["netease", "qq", "kugou"] as Platform[]).map((platform) => (
+          <div className="setting-row" key={platform}>
+            <strong>{platformNames[platform]}</strong>
+            <div className="inline-actions">
+              <select
+                aria-label={platformNames[platform] + "独立音质"}
+                value={settings.qualityPreferences?.[platform] || ""}
+                onChange={(e) =>
+                  change({
+                    qualityPreferences: {
+                      ...settings.qualityPreferences,
+                      [platform]: e.target.value as any,
+                    },
+                  })
+                }
+              >
+                <option value="">跟随默认音质</option>
+                {Object.entries(qualityNames)
+                  .filter(
+                    ([key]) =>
+                      !(platform === "qq" && ["dsd", "clear"].includes(key)) &&
+                      !(platform === "netease" && key === "dsd") &&
+                      !(platform === "kugou" && key === "surround"),
+                  )
+                  .map(([key, label]) => (
+                    <option key={key} value={key}>
+                      {label}
+                    </option>
+                  ))}
+              </select>
+              <select
+                aria-label={platformNames[platform] + "独立音源"}
+                value={settings.resolverPreferences?.[platform] || ""}
+                onChange={(e) =>
+                  change({
+                    resolverPreferences: {
+                      ...settings.resolverPreferences,
+                      [platform]: e.target.value,
+                    },
+                  })
+                }
+              >
+                <option value="">跟随全局音源</option>
+                <option value="auto">自动（内置优先，按备用配置顺序）</option>
+                <option value="builtin">仅内置接口</option>
+                {config?.resolvers
+                  ?.filter(
+                    (r: any) => r.enabled && r.platforms.includes(platform),
+                  )
+                  .map((r: any) => (
+                    <option key={r.id} value={r.id}>
+                      {r.name}
+                    </option>
+                  ))}
+              </select>
+            </div>
+          </div>
+        ))}
+        <div className="inline-actions">
+          <button
+            className="button secondary"
+            onClick={() => onTools("recovery")}
+          >
+            备份与恢复中心
+          </button>
+          <button
+            className="button secondary"
+            onClick={() => onTools("diagnostics")}
+          >
+            查看诊断与音源健康
+          </button>
+        </div>
+        {(["netease", "qq", "kugou"] as Platform[]).map((platform) => (
+          <ResolverPriority
+            key={platform}
+            platform={platform}
+            settings={settings}
+            resolvers={config?.resolvers || []}
+            onChange={change}
+          />
+        ))}
+      </section>
       <section className="settings-section about">
         <div className="brand-mark small">
           <span />
@@ -468,19 +563,14 @@ export default function Settings({
         </div>
         <div>
           <h2>
-            声屿 Sonora <span>1.2.0</span>
+            声屿 Sonora <span>{version}</span>
           </h2>
           <p>仅供学习使用，请于下载后24小时自行删除。</p>
           <p>应用不会自动删除已下载文件，请自行管理。</p>
         </div>
         <button
           className="button secondary"
-          onClick={() =>
-            window.sonora
-              .exportDiagnostics()
-              .then((p) => p && notify("诊断信息已导出"))
-              .catch((e) => notify(e.message, true))
-          }
+          onClick={() => onTools("diagnostics")}
         >
           <Download size={15} />
           导出诊断

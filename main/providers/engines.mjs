@@ -1,3 +1,4 @@
+import { QQ_FILES } from "./quality.mjs";
 import { runSdkRequest } from "./sdk-client.mjs";
 import { createRequire } from "node:module";
 import { randomUUID } from "node:crypto";
@@ -20,6 +21,77 @@ export async function engine(id) {
   return v;
 }
 export class EngineBridge {
+  async qqExtended(track, quality, { signal } = {}) {
+    const prefix = QQ_FILES[quality];
+    if (!prefix) throw Error("不支持的 QQ 音质");
+    const { cookie, uid } = this.store.credential("qq"),
+      parsed = parseCookie(cookie);
+    const uin = String(uid || parsed.uin || parsed.wxuin || "0").replace(
+      /^o/,
+      "",
+    );
+    const filename =
+      prefix + track.id + (track.meta?.mediaId || track.id) + ".flac";
+    const body = await jsonRequest("https://u.y.qq.com/cgi-bin/musicu.fcg", {
+      method: "POST",
+      signal,
+      headers: {
+        Referer: "https://y.qq.com/",
+        ...(cookie ? { Cookie: cookie } : {}),
+      },
+      body: {
+        comm: {
+          ct: 24,
+          cv: 0,
+          uin,
+          authst: parsed.qqmusic_key || parsed.p_skey || "",
+        },
+        req_0: {
+          module: "vkey.GetVkeyServer",
+          method: "CgiGetVkey",
+          param: {
+            guid: String(Math.floor(Math.random() * 1e10)),
+            filename: [filename],
+            songmid: [track.id],
+            songtype: [0],
+            uin,
+            loginflag: 1,
+            platform: "20",
+          },
+        },
+      },
+    });
+    const data = body.req_0?.data,
+      row = data?.midurlinfo?.[0];
+    if (body.req_0?.code !== 0 || !row?.purl)
+      throw Error("此 QQ 音质不可用，请检查歌曲发行规格、地区与账号权益");
+    return {
+      url: new URL(
+        row.purl,
+        data.sip?.find((x) => /^https?:/.test(x)) ||
+          "https://isure.stream.qqmusic.qq.com/",
+      ).href,
+      requestedTier: quality,
+    };
+  }
+  async verifyAccount(platform, cookie, uid, signal) {
+    const module =
+      platform === "netease"
+        ? "login_status"
+        : platform === "kugou"
+          ? "user_detail"
+          : "getUserDetail";
+    const query =
+      platform === "netease"
+        ? { cookie, timeout: 16000 }
+        : platform === "kugou"
+          ? {
+              cookie: { ...this.store.data.device, ...parseCookie(cookie) },
+              userid: uid,
+            }
+          : { uin: uid, cookie };
+    return runSdkRequest(platform, module, query, { signal, timeout: 18000 });
+  }
   constructor(store) {
     this.store = store;
     this.health = new Map();

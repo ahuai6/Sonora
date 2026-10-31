@@ -1,3 +1,6 @@
+import WorkspaceTools from "./WorkspaceTools";
+import QueuePanel from "./QueuePanel";
+import { groupSongs } from "./song-groups";
 import LrcPanel from "./LrcPanel";
 import { usePlaybackShortcuts } from "./usePlaybackShortcuts";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -153,6 +156,8 @@ export default function App() {
     [toasts, setToasts] = useState<
       { id: number; text: string; error: boolean }[]
     >([]);
+  const [toolsTab, setToolsTab] = useState(""),
+    [mergeSongs, setMergeSongs] = useState(false);
   const [tagItem, setTagItem] = useState<Item | null>(null);
   const audio = useRef<HTMLAudioElement>(null),
     searchInput = useRef<HTMLInputElement>(null),
@@ -163,6 +168,9 @@ export default function App() {
     collectionGeneration = useRef(0),
     resumeAt = useRef(0),
     currentRef = useRef<Item | null>(null);
+  const volumeRef = useRef(volume),
+    playableRef = useRef("");
+  volumeRef.current = volume;
   const notify = useCallback((text: string, error = false) => {
     text = String(text).replace(
       /^Error invoking remote method '[^']+': Error: /,
@@ -217,6 +225,31 @@ export default function App() {
     },
     [applyCollection, notify],
   );
+  const playbackSnapshot = useRef<Record<string, unknown>>({});
+  playbackSnapshot.current = {
+    queue,
+    current: current?.key,
+    position,
+    volume,
+    mode,
+  };
+  const saveQueue = () =>
+    window.sonora
+      .workspace("queueSave", playbackSnapshot.current)
+      .catch((e) => notify(e.message, true));
+  useEffect(() => {
+    const timer = setInterval(() => {
+      if (playbackSnapshot.current.current) void saveQueue();
+    }, 5000);
+    const persist = () => {
+      void saveQueue();
+    };
+    window.addEventListener("beforeunload", persist);
+    return () => {
+      clearInterval(timer);
+      window.removeEventListener("beforeunload", persist);
+    };
+  }, []);
   const bootReady = !!boot;
   useEffect(() => {
     if (bootReady && ["library", "downloads"].includes(page))
@@ -235,6 +268,27 @@ export default function App() {
       .bootstrap()
       .then((b) => {
         setBoot(b);
+        window.sonora
+          .workspace("queueLoad")
+          .then((saved) => {
+            if (!saved) return;
+            const restored = saved.queue.filter(
+              (x: Item) =>
+                x.platform !== "local" || b.library.some((i) => i.id === x.id),
+            );
+            setQueue(restored);
+            const item = restored.find((x: Item) => x.key === saved.current);
+            if (item) {
+              setCurrent(item);
+              currentRef.current = item;
+              setPosition(saved.position || 0);
+              resumeAt.current = saved.position || 0;
+              setSource("上次聆听 · 点击播放继续");
+            }
+            setVolume(saved.volume ?? 0.7);
+            setMode(saved.mode || "loop");
+          })
+          .catch(() => {});
         setWelcome(!b.acceptedDisclaimer);
         if (b.configWarning) notify(b.configWarning, true);
       })
@@ -396,13 +450,14 @@ export default function App() {
     const gen = ++collectionGeneration.current;
     setCollection(item);
     setCollectionBusy(true);
-    setCollectionPage(next);
+    if (next === 1) setCollectionPage(1);
     setSelected(new Set());
     if (next === 1)
       setCollectionItems({ items: [], errors: [], hasMore: false });
     try {
       const r = await window.sonora.collection(item, next);
-      if (gen === collectionGeneration.current)
+      if (gen === collectionGeneration.current) {
+        setCollectionPage(next);
         setCollectionItems((prev) => ({
           ...r,
           items:
@@ -414,6 +469,7 @@ export default function App() {
                   ).values(),
                 ],
         }));
+      }
     } catch (e) {
       if (gen === collectionGeneration.current)
         setCollectionItems((x) => ({
@@ -470,7 +526,12 @@ export default function App() {
       if (gen === collectionGeneration.current) setCollectionBusy(false);
     }
   }
-  async function playTrack(item: Item, items: Item[] = queue, seek = 0) {
+  async function playTrack(
+    item: Item,
+    items: Item[] = queue,
+    seek = 0,
+    tier?: Quality,
+  ) {
     if (item.kind !== "song") {
       openCollection(item);
       return;
@@ -489,10 +550,16 @@ export default function App() {
     setQueue(items.filter((x) => x.kind === "song"));
     resumeAt.current = seek;
     audio.current?.pause();
+    playableRef.current = "";
+    audio.current?.removeAttribute("src");
+    audio.current?.load();
     try {
       const result = await window.sonora.resolve(
         item,
-        boot?.settings.quality || "high",
+        tier ||
+          boot?.settings.qualityPreferences?.[item.platform as Platform] ||
+          boot?.settings.quality ||
+          "high",
       );
       if (gen !== playGeneration.current) return;
       setSource(result.source);
@@ -500,7 +567,15 @@ export default function App() {
       setTrial(result.trial);
       const player = audio.current!;
       player.src = result.mediaUrl;
-      player.volume = volume;
+      playableRef.current = item.key;
+      player.volume = volumeRef.current;
+      window.sonora
+        .probeAudio(result.mediaUrl)
+        .then((info) => {
+          if (gen === playGeneration.current)
+            setActualQuality("实测 " + info.label);
+        })
+        .catch(() => {});
       await player.play();
       if (gen === playGeneration.current) setPlaying(true);
     } catch (e) {
@@ -529,6 +604,11 @@ export default function App() {
   }
   const togglePlay = () => {
     if (!current) return;
+    if (audioBusy) return;
+    if (playableRef.current !== current.key) {
+      void playTrack(current, queue, position);
+      return;
+    }
     if (audio.current?.paused) {
       audio.current
         .play()
@@ -540,7 +620,7 @@ export default function App() {
     }
   };
   usePlaybackShortcuts({
-    enabled: !!current,
+    enabled: !!current && !audioBusy,
     onToggle: togglePlay,
     onSearch: () => searchInput.current?.focus(),
     onEscape: () => {
@@ -830,6 +910,22 @@ export default function App() {
     <div
       className={`app-shell ${boot.settings.density === "compact" ? "compact-density" : ""}`}
     >
+      {toolsTab && (
+        <WorkspaceTools
+          items={boot?.library || []}
+          selected={(boot?.library || [])
+            .filter((x) => selected.has(x.key))
+            .map((x) => x.id)}
+          initial={toolsTab}
+          collection={collectionItems.items}
+          onPlayList={(items) => {
+            void playTrack(items[0], items);
+          }}
+          onNavigate={(next) => changePage(next as Page)}
+          notify={notify}
+          onClose={() => setToolsTab("")}
+        />
+      )}
       <audio
         ref={audio}
         onPlay={() => setPlaying(true)}
@@ -1356,7 +1452,21 @@ export default function App() {
                         {page === "lyrics" || kind === "song" ? (
                           <>
                             {batch(results.items)}
-                            {table(results.items)}
+                            <label className="checkbox-label">
+                              <input
+                                type="checkbox"
+                                checked={mergeSongs}
+                                onChange={(e) =>
+                                  setMergeSongs(e.target.checked)
+                                }
+                              />
+                              合并同曲候选（保留版本区别）
+                            </label>
+                            {table(
+                              mergeSongs
+                                ? groupSongs(results.items)
+                                : results.items,
+                            )}
                           </>
                         ) : (
                           cardGrid(results.items)
@@ -1457,6 +1567,26 @@ export default function App() {
                           导入音乐
                         </button>
                       </div>
+                    </div>
+                    <div className="inline-actions library-tools">
+                      <button
+                        className="button secondary"
+                        onClick={() => setToolsTab("batch")}
+                      >
+                        批量标签与整理工具
+                      </button>
+                      <button
+                        className="text-button"
+                        onClick={() => setToolsTab("missing")}
+                      >
+                        缺失文件
+                      </button>
+                      <button
+                        className="text-button"
+                        onClick={() => setToolsTab("lists")}
+                      >
+                        导入 / 导出列表
+                      </button>
                     </div>
                     <div className="library-summary">
                       <div>
@@ -1561,6 +1691,8 @@ export default function App() {
                 ) : (
                   <Settings
                     settings={boot.settings}
+                    version={boot.version}
+                    onTools={setToolsTab}
                     onSettings={setSettings}
                     onProviders={setProviders}
                     notify={notify}
@@ -1590,23 +1722,15 @@ export default function App() {
                   </div>
                 </div>
                 {showQueue ? (
-                  <div className="queue-list">
-                    <p>{queue.length} 首歌曲</p>
-                    {queue.map((item, i) => (
-                      <button
-                        className={item.key === current.key ? "active" : ""}
-                        key={item.key}
-                        onClick={() => playTrack(item, queue)}
-                      >
-                        <span>{i + 1}</span>
-                        <div>
-                          <strong>{item.title}</strong>
-                          <small>{item.artist}</small>
-                        </div>
-                        {item.key === current.key && <Music2 size={15} />}
-                      </button>
-                    ))}
-                  </div>
+                  <QueuePanel
+                    queue={queue}
+                    current={current.key}
+                    onChange={setQueue}
+                    onPlay={(item) => playTrack(item, queue)}
+                    onSave={() => {
+                      void saveQueue().then(() => notify("队列已保存"));
+                    }}
+                  />
                 ) : (
                   <>
                     <Artwork
@@ -1630,6 +1754,25 @@ export default function App() {
                       <span className="live-dot" />
                       <span title={source}>{source}</span>
                       {trial && <em>试听片段</em>}
+                    </div>
+                    <div
+                      className="audio-specification"
+                      aria-label="当前实际音质"
+                    >
+                      <strong>实际音质</strong>
+                      <span>{actualQuality || "等待检测"}</span>
+                      {current.platform !== "local" && (
+                        <small>
+                          请求：
+                          {
+                            qualityNames[
+                              boot.settings.qualityPreferences?.[
+                                current.platform
+                              ] || boot.settings.quality
+                            ]
+                          }
+                        </small>
+                      )}
                     </div>
                   </>
                 )}
@@ -1768,13 +1911,34 @@ export default function App() {
           </div>
         </div>
         <div className="player-right">
+          <span
+            className="player-quality"
+            title={actualQuality}
+            aria-label="播放音频规格"
+          >
+            {actualQuality || "音质待检测"}
+          </span>
           <select
             aria-label="期望音质"
             title={`期望音质；当前：${actualQuality || "未播放"}`}
-            value={boot.settings.quality}
+            value={
+              current?.platform !== "local" && current
+                ? boot.settings.qualityPreferences?.[current.platform] ||
+                  boot.settings.quality
+                : boot.settings.quality
+            }
             onChange={async (e) => {
               const quality = e.target.value as Quality;
-              const s = await window.sonora.saveSettings({ quality });
+              const s = await window.sonora.saveSettings(
+                current && current.platform !== "local"
+                  ? {
+                      qualityPreferences: {
+                        ...boot.settings.qualityPreferences,
+                        [current.platform]: quality,
+                      },
+                    }
+                  : { quality },
+              );
               setSettings(s);
               if (current && current.platform !== "local")
                 notify("音质已更新，下次播放或下载时生效");

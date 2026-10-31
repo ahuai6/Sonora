@@ -1,6 +1,8 @@
 const { contextBridge, ipcRenderer } = require("electron");
 const methods = [
   "bootstrap",
+  "workspace",
+  "probeAudio",
   "search",
   "charts",
   "recommend",

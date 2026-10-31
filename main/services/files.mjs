@@ -1,3 +1,4 @@
+import { audioInfo } from "./audio-info.mjs";
 import fs from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
@@ -15,6 +16,8 @@ export const AUDIO_EXTENSIONS = new Set([
   ".aif",
   ".ape",
   ".wma",
+  ".dsf",
+  ".dff",
 ]);
 export function sniffAudio(b) {
   if (
@@ -32,15 +35,27 @@ export function sniffAudio(b) {
   if (b.subarray(4, 8).toString() === "ftyp") return "m4a";
   if (b.subarray(0, 4).toString() === "MAC ") return "ape";
   if (b.subarray(0, 4).toString() === "FORM") return "aiff";
+  if (b.subarray(0, 4).toString() === "DSD ") return "dsf";
+  if (b.subarray(0, 4).toString() === "FRM8") return "dff";
   return "";
 }
-export async function uniqueCommit(temp, folder, base, extension) {
+export async function uniqueCommit(
+  temp,
+  folder,
+  base,
+  extension,
+  { onIntent } = {},
+) {
   for (let n = 0; n < 10000; n++) {
     const target = path.join(
       folder,
       `${safeName(base)}${n ? " (" + n + ")" : ""}.${extension}`,
     );
     try {
+      // Persist intended ownership before creating the final name. Existing names
+      // are never overwritten and are verified by content when recovering.
+      if (fs.existsSync(target)) continue;
+      await onIntent?.(target);
       try {
         await fs.promises.link(temp, target);
       } catch (error) {
@@ -49,7 +64,8 @@ export async function uniqueCommit(temp, folder, base, extension) {
         // Removable / network volumes may not support hard links.
         await fs.promises.copyFile(temp, target, fs.constants.COPYFILE_EXCL);
       }
-      await fs.promises.unlink(temp);
+      // The destination is durable. Failure to remove staging must not hide it.
+      await fs.promises.unlink(temp).catch(() => {});
       return target;
     } catch (e) {
       if (e.code !== "EEXIST") throw e;
@@ -99,7 +115,15 @@ export class MusicLibrary {
               });
           }
         }
-        this.removeMany(missing);
+        this.store.data.missingLibrary ||= [];
+        const retained = new Map(
+          this.store.data.missingLibrary.map((x) => [x.id, x]),
+        );
+        for (const item of this.list())
+          if (missing.includes(item.id))
+            retained.set(item.id, { ...item, missing: true });
+        this.store.data.missingLibrary = [...retained.values()];
+        this.removeMany(missing, { remember: false });
         const result = await this.importFilesNow(files);
         return {
           ...result,
@@ -110,7 +134,7 @@ export class MusicLibrary {
     this.importQueue = job;
     return job;
   }
-  async scan(folder) {
+  async scan(folder, { automatic = false } = {}) {
     folder = path.resolve(folder);
     const found = [];
     const walk = async (dir, depth) => {
@@ -139,12 +163,23 @@ export class MusicLibrary {
       }
     };
     await walk(folder, 0);
-    return this.importFiles(found);
+    const ignored = new Set(this.store.data.ignoredLibraryPaths || []);
+    return this.importFiles(
+      automatic
+        ? found.filter((file) => !ignored.has(path.resolve(file).toLowerCase()))
+        : found,
+    );
   }
   async importFiles(files, { force = false } = {}) {
     // An explicit later import can re-add a removed item; an in-flight import cannot.
     for (const file of files)
       this.removedPaths.delete(path.resolve(file).toLowerCase());
+    const importedPaths = new Set(
+      files.map((file) => path.resolve(file).toLowerCase()),
+    );
+    this.store.data.ignoredLibraryPaths = (
+      this.store.data.ignoredLibraryPaths || []
+    ).filter((file) => !importedPaths.has(file));
     const job = this.importQueue
       .catch(() => {})
       .then(() => this.importFilesNow(files, { force }));
@@ -171,6 +206,7 @@ export class MusicLibrary {
         if (
           !force &&
           old &&
+          old.audioInfo &&
           old.modifiedAt === stat.mtimeMs &&
           old.meta?.coverVersion === 1
         )
@@ -185,7 +221,22 @@ export class MusicLibrary {
             duration: true,
             skipCovers: false,
           });
-        } catch {}
+          if (!metadata.format.codec || !metadata.format.sampleRate)
+            throw Error("未找到可解码的音频流");
+        } catch (e) {
+          failures.push({
+            file: path.basename(file),
+            message: "音频或元数据无法读取：" + e.message,
+          });
+          const head = Buffer.alloc(512),
+            handle = await fs.promises.open(resolved, "r");
+          try {
+            await handle.read(head, 0, head.length, 0);
+          } finally {
+            await handle.close();
+          }
+          if (!sniffAudio(head)) continue;
+        }
         const x = {
           id: old?.id || randomUUID(),
           key: old?.key || `local:${randomUUID()}`,
@@ -206,6 +257,8 @@ export class MusicLibrary {
           bytes: stat.size,
           bitrate: metadata?.format.bitrate || 0,
           sampleRate: metadata?.format.sampleRate || 0,
+          audioInfo: audioInfo(metadata?.format),
+          missing: false,
           modifiedAt: stat.mtimeMs,
           addedAt: old?.addedAt || Date.now(),
           favorite: old?.favorite || false,
@@ -216,6 +269,21 @@ export class MusicLibrary {
             hasEmbeddedLyrics: !!metadata?.common.lyrics?.length,
           },
         };
+        const absent = this.store.data.missingLibrary?.find(
+          (item) => item.path.toLowerCase() === resolved.toLowerCase(),
+        );
+        if (absent) {
+          Object.assign(x, {
+            id: absent.id,
+            key: absent.key,
+            favorite: absent.favorite,
+            addedAt: absent.addedAt,
+          });
+          this.store.data.missingLibrary =
+            this.store.data.missingLibrary.filter(
+              (item) => item.id !== absent.id,
+            );
+        }
         existing.set(resolved.toLowerCase(), x);
         imported++;
       } catch (e) {
@@ -243,11 +311,20 @@ export class MusicLibrary {
   remove(id) {
     return this.removeMany([id]);
   }
-  removeMany(ids) {
+  removeMany(ids, { remember = true } = {}) {
     const selected = new Set(ids);
     for (const item of this.list())
       if (selected.has(item.id))
         this.removedPaths.add(path.resolve(item.path).toLowerCase());
+    if (remember)
+      this.store.data.ignoredLibraryPaths = [
+        ...new Set([
+          ...(this.store.data.ignoredLibraryPaths || []),
+          ...this.list()
+            .filter((item) => selected.has(item.id))
+            .map((item) => path.resolve(item.path).toLowerCase()),
+        ]),
+      ];
     this.store.data.library = this.list().filter((x) => !selected.has(x.id));
     this.store.save();
     return this.list();

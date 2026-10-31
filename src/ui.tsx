@@ -13,6 +13,11 @@ export const qualityNames: Record<string, string> = {
   high: "高品 320K",
   lossless: "无损 FLAC",
   hires: "Hi-Res",
+  master: "母带",
+  spatial: "全景声",
+  surround: "环绕声（网易云 / QQ）",
+  clear: "臻音 / 超清（网易云 / 酷狗）",
+  dsd: "DSD（酷狗）",
 };
 export const duration = (n: number) =>
   `${Math.floor((n || 0) / 60)}:${String(Math.floor((n || 0) % 60)).padStart(2, "0")}`;

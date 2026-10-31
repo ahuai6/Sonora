@@ -1,3 +1,4 @@
+import LyricEditorPreview from "./LyricEditorPreview";
 import { useEffect, useState, useRef } from "react";
 import {
   Search,
@@ -522,6 +523,11 @@ export default function TagEditor({
                         setDirty(true);
                       }}
                       disabled={!!busy}
+                    />
+                    <LyricEditorPreview
+                      text={lyrics}
+                      format={format}
+                      notify={notify}
                     />
                     <div className="tag-lyrics-footer">
                       <label className="checkbox-label">

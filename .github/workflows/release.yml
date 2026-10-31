@@ -39,6 +39,10 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Desktop regression failed' }
           node tests/jerry-e2e.mjs
           if ($LASTEXITCODE -ne 0) { throw 'Bundled Jerry upgrade regression failed' }
+          npm run test:collections
+          if ($LASTEXITCODE -ne 0) { throw 'Collections regression failed' }
+          npm run test:upgrade
+          if ($LASTEXITCODE -ne 0) { throw 'Quality and recovery regression failed' }
           npm run test:account-playlists
           if ($LASTEXITCODE -ne 0) { throw 'Personal playlist regression failed' }
       - name: Generate SHA256

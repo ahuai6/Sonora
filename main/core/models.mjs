@@ -1,3 +1,4 @@
+import { EXTENDED_QUALITY } from "../providers/quality.mjs";
 export const PLATFORMS = ["netease", "qq", "kugou"];
 export const QUALITY = {
   standard: {
@@ -28,10 +29,11 @@ export const QUALITY = {
     level: "hires",
     br: 1999000,
     kbps: 1999,
-    qqQuality: "flac",
+    qqQuality: "hires",
     kgQuality: "high",
     label: "Hi-Res",
   },
+  ...EXTENDED_QUALITY,
 };
 export const get = (o, path) => path.split(".").reduce((v, k) => v?.[k], o);
 export const first = (o, paths, fallback = "") => {

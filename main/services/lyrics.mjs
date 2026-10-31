@@ -35,6 +35,18 @@ export function parseLrc(text = "") {
             : undefined;
           return [{ start: Math.max(0, start), end, text: value }];
         });
+        if (marks.length && marks[0].index > 0)
+          words.unshift({
+            start: Math.max(0, rawStart + offset),
+            end: Math.max(
+              0,
+              (+marks[0][1] * 60 + +marks[0][2]) * 1000 +
+                offset +
+                rawStart -
+                base,
+            ),
+            text: body.slice(0, marks[0].index),
+          });
         return {
           start: Math.max(0, rawStart + offset),
           text: body.replace(/<\d+:\d+(?:\.\d+)?>/g, ""),

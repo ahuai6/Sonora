@@ -122,10 +122,19 @@ export class MediaService {
         if (req.signal?.aborted) abort();
         return new Response(Readable.toWeb(stream), { status, headers });
       }
-      const response = await fetch(item.url, {
-        headers: { ...item.headers, ...(range ? { Range: range } : {}) },
-        signal: req.signal,
-      });
+      const headerControl = new AbortController(),
+        timer = setTimeout(() => headerControl.abort(), 25000);
+      let response;
+      try {
+        response = await fetch(item.url, {
+          headers: { ...item.headers, ...(range ? { Range: range } : {}) },
+          signal: req.signal
+            ? AbortSignal.any([req.signal, headerControl.signal])
+            : headerControl.signal,
+        });
+      } finally {
+        clearTimeout(timer);
+      }
       const headers = new Headers();
       for (const key of [
         "content-type",

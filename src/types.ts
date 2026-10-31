@@ -1,7 +1,29 @@
 export type Platform = "netease" | "qq" | "kugou";
-export type Quality = "standard" | "high" | "lossless" | "hires";
+export type Quality =
+  | "standard"
+  | "high"
+  | "lossless"
+  | "hires"
+  | "master"
+  | "spatial"
+  | "surround"
+  | "clear"
+  | "dsd";
 export type Kind = "song" | "artist" | "album" | "playlist" | "chart";
+export type AudioInfo = {
+  label: string;
+  codec: string;
+  bits: number;
+  sampleRate: number;
+  channels: number;
+  bitrate: number;
+  lossless: boolean;
+  evidence: string;
+};
 export type Item = {
+  variants?: Item[];
+  audioInfo?: AudioInfo;
+  missing?: boolean;
   id: string;
   key: string;
   platform: Platform | "local";
@@ -53,6 +75,7 @@ export type Download = {
   message: string;
   path?: string;
   actualQuality?: string;
+  audioInfo?: AudioInfo;
   metadata?: {
     status: "written" | "partial" | "failed" | "disabled";
     warnings: string[];
@@ -71,6 +94,9 @@ export type Settings = {
   lyricFormat: "auto" | "lrc" | "elrc" | "ttml";
   lyricSource: "auto" | "platform" | "amll";
   preferredResolver: string;
+  resolverPreferences?: Partial<Record<Platform, string>>;
+  resolverOrder?: Partial<Record<Platform, string[]>>;
+  qualityPreferences?: Partial<Record<Platform, Quality>>;
   groupByPlatform: boolean;
   concurrency: number;
   usePublicFallback: boolean;
@@ -159,6 +185,8 @@ export type TagArtwork = {
 };
 export interface API {
   bootstrap(): Promise<Bootstrap>;
+  workspace(action: string, input?: Record<string, any>): Promise<any>;
+  probeAudio(url: string): Promise<AudioInfo>;
   search(q: {
     query: string;
     kind: string;
