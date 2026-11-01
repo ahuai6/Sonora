@@ -21,6 +21,7 @@ jobs:
       - run: npm test
       - run: npm run build
       - run: npm run test:e2e
+      - run: npm run test:glass
       - run: npm run test:collections
       - run: npm run test:upgrade
       - run: npm run test:account-playlists

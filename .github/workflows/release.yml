@@ -37,6 +37,8 @@ jobs:
           $env:SONORA_TEST_EXECUTABLE = (Resolve-Path release/win-unpacked/Sonora.exe).Path
           npm run test:e2e
           if ($LASTEXITCODE -ne 0) { throw 'Desktop regression failed' }
+          npm run test:glass
+          if ($LASTEXITCODE -ne 0) { throw 'Interactive glass UI regression failed' }
           node tests/jerry-e2e.mjs
           if ($LASTEXITCODE -ne 0) { throw 'Bundled Jerry upgrade regression failed' }
           npm run test:collections
@@ -45,10 +47,14 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Quality and recovery regression failed' }
           npm run test:account-playlists
           if ($LASTEXITCODE -ne 0) { throw 'Personal playlist regression failed' }
-      - name: Generate SHA256
+      - name: Archive source and generate SHA256
         shell: pwsh
         run: |
-          $lines = Get-ChildItem -LiteralPath release -Filter 'Sonora-*-Windows-x64.exe' | ForEach-Object { "$( (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLower() )  $($_.Name)" }
+          $version = node -p "require('./package.json').version"
+          git archive --format=zip --prefix=Sonora/ --output="release/Sonora-$version-source.zip" HEAD
+          if ($LASTEXITCODE -ne 0) { throw 'Source archive failed' }
+          $files = @("release/Sonora-$version-Windows-x64.exe", "release/Sonora-$version-source.zip")
+          $lines = $files | ForEach-Object { "$( (Get-FileHash -LiteralPath $_ -Algorithm SHA256).Hash.ToLower() )  $(Split-Path -Path $_ -Leaf)" }
           $lines | Set-Content -LiteralPath release/SHA256.txt -Encoding utf8
       - name: Publish release assets
         if: startsWith(github.ref, 'refs/tags/')
@@ -65,6 +71,7 @@ jobs:
             if ($LASTEXITCODE -ne 0) { throw 'Release creation failed' }
           }
           $files = @(Get-ChildItem -LiteralPath release -Filter 'Sonora-*-Windows-x64.exe' | ForEach-Object FullName)
+          $files += @(Get-ChildItem -LiteralPath release -Filter 'Sonora-*-source.zip' | ForEach-Object FullName)
           $files += (Resolve-Path -LiteralPath release/SHA256.txt).Path
           gh release upload $env:GITHUB_REF_NAME @files --clobber
           if ($LASTEXITCODE -ne 0) { throw 'Release upload failed' }
@@ -76,6 +83,7 @@ jobs:
           name: Sonora-Windows-x64
           path: |
             release/Sonora-*-Windows-x64.exe
+            release/Sonora-*-source.zip
             release/SHA256.txt
           if-no-files-found: error
           retention-days: 3

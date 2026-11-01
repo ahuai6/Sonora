@@ -66,6 +66,8 @@ export class Store {
         concurrency: 2,
         usePublicFallback: true,
         theme: "light",
+        visualEffects: "full",
+        motionEffects: "system",
         ...(valid(saved.settings) ? saved.settings : {}),
       },
     };
@@ -137,6 +139,8 @@ export class Store {
       "concurrency",
       "usePublicFallback",
       "theme",
+      "visualEffects",
+      "motionEffects",
     ];
     for (const key of allowed)
       if (patch[key] !== undefined) this.data.settings[key] = patch[key];

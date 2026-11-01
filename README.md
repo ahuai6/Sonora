@@ -1,5 +1,11 @@
 # 声屿 Sonora
 
+## 1.5.0 玻璃音乐桌面
+
+全局玻璃材质与整体布局重构：浮动导航、可拖拽的立体唱片、寻音罗盘、桌面小组件和三个播放器面板。唱片景深、导航滑动及播放呼吸随操作呈现，可分别减少透明度与动态效果。详见 [1.5.0 更新说明](docs/release-1.5.0.md)。
+
+![音乐桌面](docs/screenshots/1.5.0-desk-dark.png)
+
 ## 1.4.0 实际音质与音乐整理
 
 播放、下载和本地音乐显示实测编码 / 位深 / 采样率 / 声道，区分请求音质和实际返回。对接三平台母带、全景声等原生参数及酷狗 DSD，新增批量标签差异预览、恢复中心、目录监听、缺失文件重新定位、平台独立音源顺序、队列与进度记忆、歌词预览和列表导入导出。详见 [1.4.0 更新说明与验证范围](docs/release-1.4.0.md)。
@@ -90,7 +96,7 @@ Windows 多平台音乐试听、下载与本地音乐管理应用。Electron + R
 可通过命令行指定独立配置目录，例如：
 
 ```powershell
-.\Sonora-1.3.3-Windows-x64.exe --user-data-dir="D:\SonoraData"
+.\Sonora-1.5.0-Windows-x64.exe --user-data-dir="D:\SonoraData"
 ```
 
 ## 源码开发
@@ -108,11 +114,12 @@ npm run dev
 npm run build
 npm test
 npm run test:e2e
+npm run test:glass
 npm run test:live
 npm run package
 ```
 
-`npm run package` 生成 `release/Sonora-1.3.3-Windows-x64.exe`。默认生成未签名的免安装版；正式分发需要自行配置代码签名证书。
+`npm run package` 生成 `release/Sonora-1.5.0-Windows-x64.exe`。默认生成未签名的免安装版；正式分发需要自行配置代码签名证书。
 
 ## 代码结构
 

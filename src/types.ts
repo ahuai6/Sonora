@@ -101,6 +101,8 @@ export type Settings = {
   concurrency: number;
   usePublicFallback: boolean;
   theme: "light" | "dark" | "system";
+  visualEffects?: "full" | "reduced";
+  motionEffects?: "system" | "reduced";
 };
 export type Provider = {
   id: Platform;

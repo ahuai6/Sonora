@@ -1,7 +1,7 @@
 {
   "name": "sonora-desktop",
   "productName": "Sonora",
-  "version": "1.4.0",
+  "version": "1.5.0",
   "description": "声屿 · 多平台音乐试听与本地音乐管理",
   "author": "Sonora contributors",
   "license": "MIT",
@@ -21,7 +21,8 @@
     "package": "npm run build && node scripts/package-windows.mjs && node scripts/check-bundled-jerry.mjs",
     "package:dir": "npm run build && node scripts/package-windows.mjs --dir && node scripts/check-bundled-jerry.mjs",
     "postinstall": "node scripts/patch-build-tools.mjs",
-    "test:upgrade": "node --test tests/upgrade-140.test.mjs && node tests/upgrade-140-e2e.mjs"
+    "test:upgrade": "node --test tests/upgrade-140.test.mjs && node tests/upgrade-140-e2e.mjs",
+    "test:glass": "node tests/glass-e2e.mjs"
   },
   "dependencies": {
     "@neteasecloudmusicapienhanced/api": "4.41.1",

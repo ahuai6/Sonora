@@ -1,0 +1,347 @@
+@media (min-width: 1600px) {
+  .app-shell {
+    padding: 0 30px 24px;
+    grid-template-rows: 26px minmax(0, 1fr) 96px;
+    gap: 18px;
+  }
+  .workspace {
+    gap: 25px;
+  }
+  .studio-header {
+    padding: 12px 18px;
+    gap: 25px;
+  }
+  .navigation-ribbon button {
+    padding: 0 16px;
+  }
+  .studio-header .global-search {
+    max-width: 390px;
+  }
+  .page-content {
+    padding: 12px 16px 22px;
+  }
+  .sound-desk-grid {
+    grid-template-columns: minmax(260px, 0.9fr) minmax(0, 3fr);
+    gap: 30px;
+  }
+  .app-shell .now-playing {
+    width: 308px;
+    padding: 22px;
+  }
+  .now-cover {
+    max-width: 255px;
+  }
+  .app-shell .player,
+  .player-track,
+  .player-center,
+  .player-right {
+    height: 96px;
+  }
+}
+@media (max-width: 1230px) {
+  .app-shell {
+    padding: 0 16px 14px;
+    grid-template-rows: 26px minmax(0, 1fr) 86px;
+    gap: 12px;
+  }
+  .window-titlebar {
+    margin: 0 -16px;
+    padding-left: 22px;
+  }
+  .workspace {
+    gap: 16px;
+  }
+  .studio-header {
+    min-height: 62px;
+    padding: 9px 11px;
+    gap: 15px;
+  }
+  .studio-brand {
+    gap: 8px;
+    padding-right: 10px;
+  }
+  .studio-brand strong {
+    font-size: 22px;
+  }
+  .studio-brand small {
+    font-size: 7px;
+  }
+  .navigation-ribbon {
+    gap: 3px;
+  }
+  .navigation-ribbon button {
+    width: 38px;
+    padding: 0;
+  }
+  .navigation-ribbon button > span {
+    display: none;
+  }
+  .studio-header .global-search {
+    max-width: 350px;
+  }
+  .workspace-bottom {
+    gap: 14px;
+  }
+  .page-content {
+    padding: 7px 5px 18px;
+  }
+  .desk-titleline h1 {
+    font-size: 25px;
+  }
+  .sound-desk-grid {
+    grid-template-columns: 220px minmax(0, 1fr);
+    gap: 20px;
+  }
+  .frequency-card {
+    padding: 18px;
+  }
+  .frequency-dial {
+    height: 152px;
+    width: 152px;
+    margin-top: 20px;
+  }
+  .frequency-copy strong {
+    font-size: 16px;
+  }
+  .chart-position {
+    display: none;
+  }
+  .charts-shelf .chart-card {
+    gap: 11px;
+    padding: 13px;
+  }
+  .app-shell .now-playing {
+    width: 242px;
+    padding: 16px 14px;
+  }
+  .now-cover {
+    max-width: 210px;
+  }
+  .page-heading h1,
+  .compact-density .page-heading h1 {
+    font-size: 25px;
+  }
+  .app-shell .player {
+    grid-template-columns: minmax(185px, 1fr) minmax(300px, 1.3fr) minmax(
+        245px,
+        1fr
+      );
+    height: 86px;
+    gap: 13px;
+  }
+  .player-track,
+  .player-center,
+  .player-right {
+    height: 86px;
+  }
+  .player-track {
+    padding: 12px 15px;
+  }
+  .player-center {
+    padding: 9px 20px;
+  }
+  .player-track .player-quality {
+    max-width: 160px;
+  }
+  .player-right {
+    padding: 0 14px;
+    gap: 7px;
+  }
+  .player-right .volume-slider {
+    width: 55px;
+  }
+  .track-head,
+  .track-row {
+    grid-template-columns:
+      18px 22px minmax(115px, 1.5fr) minmax(75px, 0.8fr)
+      55px 35px 65px;
+    gap: 7px;
+    padding-left: 7px;
+    padding-right: 7px;
+  }
+  .track-table.local .track-head,
+  .track-table.local .track-row {
+    grid-template-columns:
+      18px 22px minmax(110px, 1.5fr) minmax(65px, 0.8fr)
+      102px 35px 90px;
+  }
+  .settings-section {
+    padding: 20px;
+  }
+  .setting-row {
+    gap: 15px;
+  }
+  .setting-row .inline-actions {
+    justify-content: flex-end;
+  }
+}
+@media (max-width: 1230px) and (min-width: 1000px) {
+  .app-shell[data-inspector="open"] .sound-desk-grid {
+    grid-template-columns: 180px minmax(0, 1fr);
+    gap: 16px;
+  }
+  .app-shell[data-inspector="open"] .frequency-card {
+    padding: 16px 12px;
+  }
+  .app-shell[data-inspector="open"] .frequency-dial {
+    height: 135px;
+    width: 135px;
+    margin: 20px 0 15px;
+  }
+  .app-shell[data-inspector="open"] .widget-label > span:last-child {
+    display: none;
+  }
+  .app-shell[data-inspector="open"] .collection-pocket {
+    padding: 13px;
+    gap: 9px;
+  }
+  .app-shell[data-inspector="open"] .charts-shelf .chart-card .artwork {
+    display: none;
+  }
+}
+@media (max-height: 810px) {
+  .workspace {
+    gap: 14px;
+  }
+  .desk-titleline {
+    margin-bottom: 16px;
+  }
+  .desk-titleline h1 {
+    font-size: 24px;
+  }
+  .desk-kicker {
+    margin-bottom: 5px;
+    font-size: 7px;
+  }
+  .wall-heading {
+    margin-bottom: 13px;
+  }
+  .sound-desk-grid {
+    grid-template-columns: 220px minmax(0, 1fr);
+  }
+  .frequency-card {
+    padding: 15px 18px;
+  }
+  .frequency-dial {
+    width: 133px;
+    height: 133px;
+    margin: 14px 0 10px;
+  }
+  .dial-center {
+    width: 65px;
+    height: 65px;
+  }
+  .dial-center svg {
+    width: 33px;
+  }
+  .frequency-copy {
+    gap: 5px;
+    min-height: 60px;
+  }
+  .frequency-copy strong {
+    font-size: 15px;
+  }
+  .frequency-actions {
+    padding-top: 10px;
+  }
+  .collection-pocket {
+    min-height: 70px;
+    padding: 13px;
+  }
+  .desk-side {
+    gap: 13px;
+  }
+  .charts-shelf {
+    margin-top: 20px;
+  }
+  .charts-shelf .chart-card {
+    padding: 11px 13px;
+  }
+  .charts-shelf .chart-card .artwork {
+    width: 39px;
+    height: 39px;
+  }
+  .discovery-desk .page-footer {
+    margin-top: 16px;
+    padding-top: 10px;
+  }
+  .now-cover {
+    max-width: 166px;
+  }
+  .now-heading {
+    margin-bottom: 12px;
+  }
+  .now-meta {
+    margin-top: 11px;
+  }
+  .now-meta h2 {
+    font-size: 16px;
+  }
+  .now-playing .lyric-scroll {
+    margin: 9px 0 5px;
+    min-height: 45px;
+    padding-top: 18px;
+  }
+  .audio-specification {
+    padding: 9px 11px;
+    font-size: 9px;
+  }
+  .now-source {
+    padding-top: 5px;
+  }
+}
+:root[data-effects="reduced"] {
+  --glass: var(--bg);
+  --glass-strong: color-mix(in srgb, var(--bg), var(--text) 3%);
+  --surface: var(--glass-strong);
+  --input: var(--glass-strong);
+  --blur: 0px;
+}
+:root[data-effects="reduced"]
+  :is(
+    .glass-surface,
+    .glass-control,
+    .modal,
+    .modal-backdrop,
+    .toast,
+    .row-more-panel,
+    .chart-card
+  ) {
+  backdrop-filter: none;
+}
+:root[data-effects="reduced"] .ambient-art,
+:root[data-effects="reduced"] .ambient-grain {
+  display: none;
+}
+@supports not (backdrop-filter: blur(1px)) {
+  .glass-surface,
+  .modal,
+  .toast,
+  .row-more-panel,
+  .chart-card {
+    background: var(--bg);
+  }
+}
+@media (prefers-reduced-transparency: reduce) {
+  .glass-surface,
+  .modal,
+  .toast,
+  .row-more-panel,
+  .chart-card {
+    background: var(--bg);
+    backdrop-filter: none;
+  }
+  .ambient-art,
+  .ambient-grain {
+    display: none;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation: none !important;
+    transition: none !important;
+    scroll-behavior: auto !important;
+  }
+}

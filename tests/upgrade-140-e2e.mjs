@@ -444,7 +444,9 @@ try {
   });
   passed.push("recovery center opens");
   await tool.getByRole("button", { name: "诊断预览", exact: true }).click();
-  await expect(tool.locator("pre")).toContainText("1.4.0");
+  await expect(tool.locator("pre")).toContainText(
+    JSON.parse(fs.readFileSync("package.json", "utf8")).version,
+  );
   assert(!(await tool.locator("pre").innerText()).includes("qqmusic_key"));
   passed.push("redacted diagnostic preview");
   await tool.getByRole("button", { name: "关闭", exact: true }).click();

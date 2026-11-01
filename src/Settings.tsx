@@ -247,6 +247,49 @@ export default function Settings({
       </section>
       <section className="settings-section">
         <div className="settings-title">
+          <SlidersHorizontal size={20} />
+          <h2>玻璃与动效</h2>
+        </div>
+        <div className="setting-row">
+          <div>
+            <strong>玻璃效果</strong>
+            <p>通透玻璃呈现背景层次；轻量模式减少模糊与装饰，保留清晰布局。</p>
+          </div>
+          <select
+            aria-label="玻璃效果"
+            value={settings.visualEffects || "full"}
+            onChange={(e) =>
+              change({ visualEffects: e.target.value as "full" | "reduced" })
+            }
+          >
+            <option value="full">通透玻璃</option>
+            <option value="reduced">轻量 · 减少透明</option>
+          </select>
+        </div>
+        <div className="setting-row">
+          <div>
+            <strong>动态效果</strong>
+            <p>
+              唱片景深、导航滑动与播放呼吸随操作呈现。默认遵循系统的减少动态效果设置。
+            </p>
+          </div>
+          <select
+            aria-label="动态效果"
+            value={settings.motionEffects || "system"}
+            onChange={(e) =>
+              change({ motionEffects: e.target.value as "system" | "reduced" })
+            }
+          >
+            <option value="system">灵动交互 · 跟随系统</option>
+            <option value="reduced">减少动态效果</option>
+          </select>
+        </div>
+        <p className="form-help">
+          系统开启“减少动态效果”时，界面自动减少动效。
+        </p>
+      </section>
+      <section className="settings-section">
+        <div className="settings-title">
           <Radio size={20} />
           <h2>平台接口</h2>
           <span>修改后点击保存</span>

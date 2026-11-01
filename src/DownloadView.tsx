@@ -2,7 +2,6 @@ import {
   Download,
   FolderOpen,
   Pause,
-  Play,
   RotateCcw,
   X,
   CheckCircle2,

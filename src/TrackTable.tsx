@@ -2,7 +2,6 @@ import {
   Play,
   Download,
   FileText,
-  Check,
   FolderOpen,
   Heart,
   Trash2,
@@ -134,9 +133,15 @@ export default function TrackTable({
                 <div className="local-format">
                   <strong title={item.audioInfo?.label}>
                     {item.missing ? "文件缺失" : item.format}
+                    {!!item.audioInfo?.bits && ` · ${item.audioInfo.bits} bit`}
                   </strong>
-                  <span title={item.audioInfo?.label}>
-                    {item.audioInfo?.label}
+                  <span
+                    title={item.audioInfo?.label}
+                    aria-label={item.audioInfo?.label}
+                  >
+                    {item.audioInfo?.sampleRate
+                      ? `${+(item.audioInfo.sampleRate / 1000).toFixed(3)} kHz${item.audioInfo.channels ? " · " + item.audioInfo.channels + " ch" : ""}`
+                      : "规格待检测"}
                   </span>
                   <span>{bytes(item.bytes)}</span>
                 </div>

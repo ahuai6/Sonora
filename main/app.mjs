@@ -627,6 +627,16 @@ if (!app.requestSingleInstanceLock()) {
       artwork(await metadataMatcher.cover(id)),
     );
     bind("saveSettings", (patch) => {
+      if (
+        patch.visualEffects &&
+        !["full", "reduced"].includes(patch.visualEffects)
+      )
+        throw Error("视觉效果设置不正确");
+      if (
+        patch.motionEffects &&
+        !["system", "reduced"].includes(patch.motionEffects)
+      )
+        throw Error("动态效果设置不正确");
       if (patch.density && !["compact", "comfortable"].includes(patch.density))
         throw Error("信息密度设置不正确");
       if (patch.acceptedDisclaimer !== undefined) {

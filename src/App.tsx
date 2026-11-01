@@ -1,40 +1,26 @@
+import MotionPresence from "./layout/MotionPresence";
+import PlayerDock from "./layout/PlayerDock";
+import ListeningPanel from "./layout/ListeningPanel";
+import { AmbientBackdrop, WindowChrome, type Page } from "./layout/AppChrome";
+import StudioHeader from "./layout/StudioHeader";
+import DiscoveryDesk from "./layout/DiscoveryDesk";
 import WorkspaceTools from "./WorkspaceTools";
-import QueuePanel from "./QueuePanel";
 import { groupSongs } from "./song-groups";
-import LrcPanel from "./LrcPanel";
 import { usePlaybackShortcuts } from "./usePlaybackShortcuts";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Search,
-  Compass,
   Music2,
   Download,
   FolderHeart,
   FileText,
-  SlidersHorizontal,
-  UserRound,
   ArrowUpRight,
   ArrowLeft,
-  ChevronRight,
   Play,
-  Pause,
-  SkipBack,
-  SkipForward,
-  Volume2,
-  VolumeX,
-  Shuffle,
-  Repeat,
-  Repeat1,
-  ListMusic,
-  PanelRightClose,
-  PanelRightOpen,
-  Check,
   Plus,
   FolderOpen,
   AlertCircle,
   X,
-  Minus,
-  Square,
   Loader2,
   RefreshCw,
   Disc3,
@@ -61,27 +47,16 @@ import {
   PlatformBadge,
   platformNames,
   qualityNames,
-  duration,
   bytes,
   Empty,
   Busy,
   Modal,
-  SectionHeading,
-  weave,
 } from "./ui";
 import Accounts from "./Accounts";
 import Settings from "./Settings";
 import TrackTable from "./TrackTable";
 import DownloadView from "./DownloadView";
 import TagEditor from "./TagEditor";
-type Page =
-  | "discover"
-  | "search"
-  | "lyrics"
-  | "library"
-  | "downloads"
-  | "accounts"
-  | "settings";
 type SearchKind = "song" | "artist" | "album" | "playlist";
 const kinds: { id: SearchKind; name: string }[] = [
   { id: "song", name: "歌曲" },
@@ -89,13 +64,6 @@ const kinds: { id: SearchKind; name: string }[] = [
   { id: "album", name: "专辑" },
   { id: "playlist", name: "歌单" },
 ];
-const navs = [
-  { id: "discover", label: "发现音乐", Icon: Compass },
-  { id: "search", label: "搜索资源", Icon: Search },
-  { id: "lyrics", label: "歌词搜索", Icon: FileText },
-  { id: "library", label: "本地音乐", Icon: FolderHeart },
-  { id: "downloads", label: "下载中心", Icon: Download },
-] as const;
 export default function App() {
   const [boot, setBoot] = useState<Bootstrap | null>(null),
     [fatal, setFatal] = useState("");
@@ -159,6 +127,10 @@ export default function App() {
   const [toolsTab, setToolsTab] = useState(""),
     [mergeSongs, setMergeSongs] = useState(false);
   const [tagItem, setTagItem] = useState<Item | null>(null);
+  const pageScroll = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    pageScroll.current?.scrollTo({ top: 0, behavior: "instant" });
+  }, [page, collection?.key, collection?.id]);
   const audio = useRef<HTMLAudioElement>(null),
     searchInput = useRef<HTMLInputElement>(null),
     playGeneration = useRef(0),
@@ -320,6 +292,14 @@ export default function App() {
     m.addEventListener("change", update);
     return () => m.removeEventListener("change", update);
   }, [boot?.settings.theme]);
+  useEffect(() => {
+    document.documentElement.dataset.effects =
+      boot?.settings.visualEffects || "full";
+  }, [boot?.settings.visualEffects]);
+  useEffect(() => {
+    document.documentElement.dataset.motion =
+      boot?.settings.motionEffects || "system";
+  }, [boot?.settings.motionEffects]);
   const setAccounts = (accounts: Account[]) =>
     setBoot((b) => (b ? { ...b, accounts } : b));
   const setSettings = (settings: SettingsType) =>
@@ -743,7 +723,6 @@ export default function App() {
       x.status,
     ),
   ).length;
-  const resultList = collection ? collectionItems.items : results.items;
   const cardGrid = (items: Item[], max?: number) => (
     <div className="card-grid">
       {items.slice(0, max).map((item) => (
@@ -908,8 +887,12 @@ export default function App() {
     );
   return (
     <div
+      data-page={page}
+      data-inspector={current && showPlayer ? "open" : "closed"}
+      data-playing={playing ? "true" : "false"}
       className={`app-shell ${boot.settings.density === "compact" ? "compact-density" : ""}`}
     >
+      <AmbientBackdrop item={current} />
       {toolsTab && (
         <WorkspaceTools
           items={boot?.library || []}
@@ -961,156 +944,38 @@ export default function App() {
             notify("音频无法解码或链接已过期，可重新点击播放更换音源。", true);
         }}
       />
-      <div className="window-titlebar">
-        <span>SONORA — 声音，自有归处</span>
-        <div className="window-controls">
-          <button
-            aria-label="最小化"
-            onClick={() => window.sonora.windowAction("minimize")}
-          >
-            <Minus size={15} />
-          </button>
-          <button
-            aria-label="最大化"
-            onClick={() => window.sonora.windowAction("maximize")}
-          >
-            <Square size={12} />
-          </button>
-          <button
-            aria-label="关闭窗口"
-            className="close-window"
-            onClick={() => window.sonora.windowAction("close")}
-          >
-            <X size={17} />
-          </button>
-        </div>
-      </div>
+      <WindowChrome />
       <div className="app-body">
-        <aside className="sidebar">
-          <button className="brand" onClick={() => changePage("discover")}>
-            <div className="brand-mark">
-              <span />
-              <span />
-              <span />
-              <span />
-              <span />
-            </div>
-            <div>
-              <strong>声屿</strong>
-              <span>SONORA</span>
-            </div>
-          </button>
-          <div className="nav-label">音乐空间</div>
-          <nav>
-            {navs.map(({ id, label, Icon }) => (
-              <button
-                key={id}
-                className={page === id ? "active" : ""}
-                onClick={() => changePage(id)}
-              >
-                <Icon size={19} strokeWidth={1.8} />
-                <span>{label}</span>
-                {id === "downloads" && activeDownloads > 0 && (
-                  <em>{activeDownloads}</em>
-                )}
-              </button>
-            ))}
-          </nav>
-          <div className="sidebar-separator" />
-          <div className="nav-label">偏好设置</div>
-          <nav>
-            <button
-              className={page === "accounts" ? "active" : ""}
-              onClick={() => changePage("accounts")}
-            >
-              <UserRound size={19} />
-              <span>平台账号</span>
-              {boot.accounts.length > 0 && <span className="connection-dot" />}
-            </button>
-            <button
-              className={page === "settings" ? "active" : ""}
-              onClick={() => changePage("settings")}
-            >
-              <SlidersHorizontal size={19} />
-              <span>偏好与音源</span>
-            </button>
-          </nav>
-          <div className="sidebar-bottom">
-            <div className="source-constellation">
-              <span className="netease">云</span>
-              <span className="qq">Q</span>
-              <span className="kugou">酷</span>
-              <span className="constellation-line" />
-            </div>
-            <strong>音乐，无需来回切换</strong>
-            <p>三个世界，一处聆听。</p>
-            <button onClick={() => changePage("accounts")}>
-              {boot.accounts.length
-                ? `${boot.accounts.length} 个账号已保存`
-                : "连接你的账号"}
-              <ArrowUpRight size={14} />
-            </button>
-          </div>
-          <div className="sidebar-foot">
-            SONORA DESKTOP <span>{boot?.version || "1.3.0"}</span>
-          </div>
-        </aside>
         <main className="workspace">
-          <header className="topbar">
-            <div className="breadcrumb">
-              音乐空间 <ChevronRight size={13} />
-              <strong>
-                {collection
-                  ? "资源详情"
-                  : navs.find((x) => x.id === page)?.label ||
-                    { accounts: "平台账号", settings: "偏好与音源" }[
-                      page as "accounts" | "settings"
-                    ]}
-              </strong>
-            </div>
-            <form
-              className="global-search"
-              onSubmit={(e) => {
-                e.preventDefault();
-                doSearch();
-              }}
-            >
-              <Search size={17} />
-              <input
-                ref={searchInput}
-                aria-label="搜索音乐资源"
-                placeholder={
-                  page === "lyrics"
-                    ? "输入歌名、歌手或歌词片段"
-                    : "搜索歌曲、歌手、专辑或歌单"
-                }
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-              />
-              {query ? (
-                <button
-                  type="button"
-                  onClick={() => setQuery("")}
-                  aria-label="清空搜索"
-                >
-                  <X size={14} />
-                </button>
-              ) : (
-                <kbd>Ctrl F</kbd>
-              )}
-            </form>
-            <button
-              className="account-button"
-              onClick={() => changePage("accounts")}
-              title="平台账号"
-            >
-              <UserRound size={18} />
-              <span>{boot.accounts.length ? "我的账号" : "未登录"}</span>
-            </button>
-          </header>
+          <StudioHeader
+            page={page}
+            onPage={changePage}
+            query={query}
+            onQuery={setQuery}
+            onSearch={() => {
+              void doSearch();
+            }}
+            inputRef={searchInput}
+            theme={boot.settings.theme}
+            activeDownloads={activeDownloads}
+            onTheme={() => {
+              window.sonora
+                .saveSettings({
+                  theme:
+                    document.documentElement.dataset.theme === "dark"
+                      ? "light"
+                      : "dark",
+                })
+                .then(setSettings)
+                .catch((e) => notify(e.message, true));
+            }}
+          />
           <div className="workspace-bottom">
-            <div className="page-scroll">
-              <div className="page-content">
+            <div ref={pageScroll} className="page-scroll">
+              <div
+                key={collection?.key || collection?.id || page}
+                className="page-content"
+              >
                 {collection ? (
                   <>
                     <button
@@ -1187,168 +1052,20 @@ export default function App() {
                     )}
                   </>
                 ) : page === "discover" ? (
-                  <>
-                    <div className="page-heading discover-heading">
-                      <div>
-                        <div className="eyebrow">
-                          A LITTLE SOUND, A LITTLE ESCAPE
-                        </div>
-                        <h1>此刻，听见喜欢。</h1>
-                        <p>在不同的音乐世界里，遇见同一种心动。</p>
-                      </div>
-                      <button
-                        className="icon-button refresh-discovery"
-                        title="刷新推荐与榜单"
-                        aria-label="刷新发现"
-                        disabled={discoveryBusy}
-                        onClick={fetchDiscovery}
-                      >
-                        <RefreshCw
-                          size={19}
-                          className={discoveryBusy ? "spin" : ""}
-                        />
-                      </button>
-                    </div>
-                    <div className="platform-pills">
-                      {(["all", "netease", "qq", "kugou"] as const).map((p) => (
-                        <button
-                          className={platform === p ? "active" : ""}
-                          onClick={() => setPlatform(p)}
-                          key={p}
-                        >
-                          {p === "all" ? (
-                            <span className="all-dot" />
-                          ) : (
-                            <i className={`platform-dot ${p}`} />
-                          )}{" "}
-                          {p === "all" ? "全部音源" : platformNames[p]}
-                        </button>
-                      ))}
-                    </div>
-                    <div className="discovery-hero">
-                      <div className="hero-copy">
-                        <span className="hero-label">
-                          <span />
-                          YOUR PERSONAL SOUND ISLAND
-                        </span>
-                        <h2>
-                          喜欢的声音，
-                          <br />
-                          都在这一座岛。
-                        </h2>
-                        <p>跨越平台发现音乐，随时试听，悉心收藏。</p>
-                        <button
-                          onClick={() => {
-                            changePage("search");
-                            searchInput.current?.focus();
-                          }}
-                        >
-                          开始探索
-                          <ArrowUpRight size={16} />
-                        </button>
-                      </div>
-                      <div className="hero-art" aria-hidden="true">
-                        <div className="hero-disc">
-                          <div className="disc-center">
-                            <div className="brand-mark small">
-                              <span />
-                              <span />
-                              <span />
-                              <span />
-                              <span />
-                            </div>
-                          </div>
-                        </div>
-                        <div className="floating-label label-one">
-                          <Music2 size={14} />
-                          让音乐自由流动
-                        </div>
-                        <div className="floating-label label-two">
-                          <span className="tiny-bars">
-                            <i />
-                            <i />
-                            <i />
-                            <i />
-                          </span>
-                          ON YOUR OWN FREQUENCY
-                        </div>
-                        <div className="hero-spark s1">✧</div>
-                        <div className="hero-spark s2">✦</div>
-                      </div>
-                    </div>
-                    {errorNotice(discoveryErrors)}
-                    <SectionHeading
-                      label="为你发现"
-                      description="来自各平台的公开推荐歌单"
-                    />
-                    {recommendations.length ? (
-                      cardGrid(weave(recommendations), 12)
-                    ) : discoveryBusy ? (
-                      <div className="skeleton-grid">
-                        {[0, 1, 2, 3, 4].map((n) => (
-                          <div key={n} className="skeleton-card">
-                            <i />
-                            <span />
-                            <span />
-                          </div>
-                        ))}
-                      </div>
-                    ) : (
-                      <Empty
-                        heading="推荐正在路上"
-                        description="当前平台暂未返回推荐，搜索仍可独立使用。"
-                        action={
-                          <button
-                            className="button secondary"
-                            onClick={() => changePage("search")}
-                          >
-                            搜索音乐
-                            <ArrowUpRight size={15} />
-                          </button>
-                        }
-                      />
-                    )}
-                    <SectionHeading
-                      label="正在流行"
-                      description="从榜单里，听见当下"
-                    />
-                    {charts.length ? (
-                      <div className="chart-grid">
-                        {weave(charts)
-                          .slice(0, 9)
-                          .map((item, i) => (
-                            <button
-                              className="chart-card"
-                              key={item.key}
-                              onClick={() => openCollection(item)}
-                            >
-                              <Artwork item={item} />
-                              <div>
-                                <PlatformBadge platform={item.platform} />
-                                <strong>{item.title}</strong>
-                                <span>
-                                  {item.trackCount
-                                    ? `${item.trackCount} 首上榜歌曲`
-                                    : "查看完整榜单"}
-                                </span>
-                              </div>
-                              <ArrowUpRight size={18} />
-                            </button>
-                          ))}
-                      </div>
-                    ) : discoveryBusy ? (
-                      <Busy text="正在获取各平台榜单" />
-                    ) : (
-                      <Empty
-                        heading="暂未取得榜单"
-                        description="可尝试其他平台，或在接口设置中查看连接情况。"
-                      />
-                    )}
-                    <div className="page-footer">
-                      仅供学习使用，请于下载后24小时自行删除。
-                      <span>LISTEN. DISCOVER. KEEP WHAT MOVES YOU.</span>
-                    </div>
-                  </>
+                  <DiscoveryDesk
+                    recommendations={recommendations}
+                    charts={charts}
+                    platform={platform}
+                    onPlatform={setPlatform}
+                    onOpen={(item) => {
+                      void openCollection(item);
+                    }}
+                    onPage={changePage}
+                    onRefresh={fetchDiscovery}
+                    busy={discoveryBusy}
+                    libraryCount={boot.library.length}
+                    notice={errorNotice(discoveryErrors)}
+                  />
                 ) : page === "search" || page === "lyrics" ? (
                   <>
                     <div className="page-heading">
@@ -1359,13 +1076,11 @@ export default function App() {
                             : "SEARCH ACROSS YOUR MUSIC WORLD"}
                         </div>
                         <h1>
-                          {page === "lyrics"
-                            ? "寻找一句，刚好懂你的歌词。"
-                            : "所有喜欢，一次找到。"}
+                          {page === "lyrics" ? "歌词工作室" : "找到下一首喜欢"}
                         </h1>
                         <p>
                           {page === "lyrics"
-                            ? "单独搜索歌词资源，预览并保存为 LRC 文件。"
+                            ? "搜索、预览并导出逐行或逐字歌词。"
                             : "聚合搜索三个平台，或专注于你熟悉的音源。"}
                         </p>
                       </div>
@@ -1700,293 +1415,113 @@ export default function App() {
                 )}
               </div>
             </div>
-            {current && showPlayer && (
-              <aside className="now-playing">
-                <div className="now-heading">
-                  <strong>{showQueue ? "播放队列" : "正在聆听"}</strong>
-                  <div>
-                    <button
-                      className={`icon-button ${showQueue ? "accent" : ""}`}
-                      aria-label="切换播放队列"
-                      onClick={() => setShowQueue(!showQueue)}
-                    >
-                      <ListMusic size={17} />
-                    </button>
-                    <button
-                      className="icon-button"
-                      aria-label="收起正在播放面板"
-                      onClick={() => setShowPlayer(false)}
-                    >
-                      <PanelRightClose size={16} />
-                    </button>
-                  </div>
-                </div>
-                {showQueue ? (
-                  <QueuePanel
-                    queue={queue}
-                    current={current.key}
-                    onChange={setQueue}
-                    onPlay={(item) => playTrack(item, queue)}
-                    onSave={() => {
-                      void saveQueue().then(() => notify("队列已保存"));
-                    }}
-                  />
-                ) : (
-                  <>
-                    <Artwork
-                      key={current.key}
-                      item={current}
-                      className="now-cover"
-                    />
-                    <div className="now-meta">
-                      <PlatformBadge platform={current.platform} />
-                      <h2>{current.title}</h2>
-                      <p>{current.artist || "未知歌手"}</p>
-                    </div>
-                    <LrcPanel
-                      lyric={lyric}
-                      position={position}
-                      onSeek={(t) => {
-                        if (audio.current) audio.current.currentTime = t;
-                      }}
-                    />
-                    <div className="now-source">
-                      <span className="live-dot" />
-                      <span title={source}>{source}</span>
-                      {trial && <em>试听片段</em>}
-                    </div>
-                    <div
-                      className="audio-specification"
-                      aria-label="当前实际音质"
-                    >
-                      <strong>实际音质</strong>
-                      <span>{actualQuality || "等待检测"}</span>
-                      {current.platform !== "local" && (
-                        <small>
-                          请求：
-                          {
-                            qualityNames[
-                              boot.settings.qualityPreferences?.[
-                                current.platform
-                              ] || boot.settings.quality
-                            ]
-                          }
-                        </small>
-                      )}
-                    </div>
-                  </>
-                )}
-              </aside>
+            {current && (
+              <MotionPresence visible={showPlayer}>
+                <ListeningPanel
+                  current={current}
+                  queue={queue}
+                  showQueue={showQueue}
+                  lyric={lyric}
+                  position={position}
+                  source={source}
+                  trial={trial}
+                  actualQuality={actualQuality}
+                  requestedQuality={
+                    current.platform === "local"
+                      ? "本地文件"
+                      : qualityNames[
+                          boot.settings.qualityPreferences?.[
+                            current.platform
+                          ] || boot.settings.quality
+                        ]
+                  }
+                  onClose={() => setShowPlayer(false)}
+                  onToggleQueue={() => setShowQueue(!showQueue)}
+                  onQueue={setQueue}
+                  onPlay={(item) => {
+                    void playTrack(item, queue);
+                  }}
+                  onSave={() => {
+                    void saveQueue().then(() => notify("队列已保存"));
+                  }}
+                  onSeek={(time) => {
+                    if (audio.current) audio.current.currentTime = time;
+                  }}
+                />
+              </MotionPresence>
             )}
           </div>
         </main>
       </div>
-      <footer className="player">
-        <div className="player-track">
-          {current ? (
-            <>
-              <Artwork key={current.key} item={current} size="small" />
-              <div>
-                <strong title={current.title}>{current.title}</strong>
-                <span>{current.artist || "未知歌手"}</span>
-              </div>
-              {current.platform !== "local" && (
-                <button
-                  className="icon-button"
-                  title="下载当前歌曲"
-                  aria-label="下载当前歌曲"
-                  onClick={() => download([current])}
-                >
-                  <Download size={17} />
-                </button>
-              )}
-            </>
-          ) : (
-            <>
-              <div className="player-idle-art">
-                <Music2 size={22} />
-              </div>
-              <div>
-                <strong>让音乐，慢慢靠近</strong>
-                <span>选择一首歌，开始聆听</span>
-              </div>
-            </>
-          )}
-        </div>
-        <div className="player-center">
-          <div className="play-controls">
-            <button
-              className={`icon-button mode-button ${mode !== "loop" ? "accent" : ""}`}
-              aria-label="切换播放模式"
-              title={
-                mode === "loop"
-                  ? "列表循环"
-                  : mode === "shuffle"
-                    ? "随机播放"
-                    : "单曲循环"
-              }
-              onClick={() =>
-                setMode((m) =>
-                  m === "loop" ? "shuffle" : m === "shuffle" ? "one" : "loop",
-                )
-              }
-            >
-              {mode === "shuffle" ? (
-                <Shuffle size={16} />
-              ) : mode === "one" ? (
-                <Repeat1 size={17} />
-              ) : (
-                <Repeat size={17} />
-              )}
-            </button>
-            <button
-              className="icon-button"
-              aria-label="上一首"
-              disabled={!current}
-              onClick={() => {
-                if (position > 3 && audio.current)
-                  audio.current.currentTime = 0;
-                else advance(-1);
-              }}
-            >
-              <SkipBack size={19} fill="currentColor" />
-            </button>
-            <button
-              className="play-main"
-              aria-label={playing ? "暂停" : "播放"}
-              disabled={!current || audioBusy}
-              onClick={togglePlay}
-            >
-              {audioBusy ? (
-                <Loader2 size={22} className="spin" />
-              ) : playing ? (
-                <Pause size={20} fill="currentColor" />
-              ) : (
-                <Play size={21} fill="currentColor" />
-              )}
-            </button>
-            <button
-              className="icon-button"
-              aria-label="下一首"
-              disabled={!current}
-              onClick={() => advance()}
-            >
-              <SkipForward size={19} fill="currentColor" />
-            </button>
-            <button
-              className="icon-button"
-              title="歌词与播放面板"
-              aria-label="显示歌词面板"
-              onClick={() => {
-                setShowPlayer(!showPlayer);
-                setShowQueue(false);
-              }}
-            >
-              <FileText size={17} />
-            </button>
-          </div>
-          <div className="timeline">
-            <span>{duration(position)}</span>
-            <input
-              type="range"
-              aria-label="播放进度"
-              min="0"
-              max={audioDuration || 1}
-              step="0.1"
-              value={Math.min(position, audioDuration || 1)}
-              disabled={!current || !audioDuration}
-              style={
-                {
-                  "--progress": `${audioDuration ? (position / audioDuration) * 100 : 0}%`,
-                } as React.CSSProperties
-              }
-              onChange={(e) => {
-                if (audio.current) {
-                  audio.current.currentTime = Number(e.target.value);
-                  setPosition(Number(e.target.value));
-                }
-              }}
-            />
-            <span>{duration(audioDuration || current?.duration || 0)}</span>
-          </div>
-        </div>
-        <div className="player-right">
-          <span
-            className="player-quality"
-            title={actualQuality}
-            aria-label="播放音频规格"
-          >
-            {actualQuality || "音质待检测"}
-          </span>
-          <select
-            aria-label="期望音质"
-            title={`期望音质；当前：${actualQuality || "未播放"}`}
-            value={
-              current?.platform !== "local" && current
-                ? boot.settings.qualityPreferences?.[current.platform] ||
-                  boot.settings.quality
-                : boot.settings.quality
-            }
-            onChange={async (e) => {
-              const quality = e.target.value as Quality;
-              const s = await window.sonora.saveSettings(
-                current && current.platform !== "local"
-                  ? {
-                      qualityPreferences: {
-                        ...boot.settings.qualityPreferences,
-                        [current.platform]: quality,
-                      },
-                    }
-                  : { quality },
-              );
-              setSettings(s);
+      <PlayerDock
+        current={current}
+        playing={playing}
+        busy={audioBusy}
+        position={position}
+        audioDuration={audioDuration}
+        volume={volume}
+        mode={mode}
+        quality={
+          current && current.platform !== "local"
+            ? boot.settings.qualityPreferences?.[current.platform] ||
+              boot.settings.quality
+            : boot.settings.quality
+        }
+        actualQuality={actualQuality}
+        showLyrics={!!current && showPlayer && !showQueue}
+        showQueue={!!current && showPlayer && showQueue}
+        onDownload={() => {
+          if (current) void download([current]);
+        }}
+        onMode={() =>
+          setMode((m) =>
+            m === "loop" ? "shuffle" : m === "shuffle" ? "one" : "loop",
+          )
+        }
+        onPrevious={() => {
+          if (position > 3 && audio.current) audio.current.currentTime = 0;
+          else advance(-1);
+        }}
+        onToggle={togglePlay}
+        onNext={() => advance()}
+        onLyrics={() => {
+          setShowPlayer(!showPlayer);
+          setShowQueue(false);
+        }}
+        onSeek={(time) => {
+          if (audio.current) {
+            audio.current.currentTime = time;
+            setPosition(time);
+          }
+        }}
+        onQuality={(quality) => {
+          window.sonora
+            .saveSettings(
+              current && current.platform !== "local"
+                ? {
+                    qualityPreferences: {
+                      ...boot.settings.qualityPreferences,
+                      [current.platform]: quality,
+                    },
+                  }
+                : { quality },
+            )
+            .then((settings) => {
+              setSettings(settings);
               if (current && current.platform !== "local")
                 notify("音质已更新，下次播放或下载时生效");
-            }}
-          >
-            {Object.entries(qualityNames).map(([v, n]) => (
-              <option key={v} value={v}>
-                {n}
-              </option>
-            ))}
-          </select>
-          <button
-            className="icon-button volume-button"
-            aria-label={volume ? "静音" : "取消静音"}
-            onClick={() => {
-              const v = volume ? 0 : 0.7;
-              setVolume(v);
-              if (audio.current) audio.current.volume = v;
-            }}
-          >
-            {volume ? <Volume2 size={18} /> : <VolumeX size={18} />}
-          </button>
-          <input
-            aria-label="音量"
-            className="volume-slider"
-            type="range"
-            min="0"
-            max="1"
-            step=".01"
-            value={volume}
-            style={{ "--progress": `${volume * 100}%` } as React.CSSProperties}
-            onChange={(e) => {
-              setVolume(Number(e.target.value));
-              if (audio.current) audio.current.volume = Number(e.target.value);
-            }}
-          />
-          <button
-            className="icon-button queue-button"
-            aria-label="打开播放队列"
-            onClick={() => {
-              setShowPlayer(true);
-              setShowQueue(!showQueue);
-            }}
-          >
-            <ListMusic size={20} />
-          </button>
-        </div>
-      </footer>
+            })
+            .catch((e) => notify(e.message, true));
+        }}
+        onVolume={(value) => {
+          setVolume(value);
+          if (audio.current) audio.current.volume = value;
+        }}
+        onQueue={() => {
+          setShowPlayer(true);
+          setShowQueue(!showQueue);
+        }}
+      />
       <div className="toast-stack" aria-live="polite">
         {toasts.map((t) => (
           <div className={`toast ${t.error ? "error" : ""}`} key={t.id}>
