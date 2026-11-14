@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import type { API, Item } from "../types";
 import { Busy, Modal } from "../ui";
-import { localAlignment, readPaste } from "./align";
+import { localAlignment, readPaste, referenceRows } from "./align";
+import { classifyLrc, existingLrcTranslations } from "./source-lines";
 import OnlineLyrics from "./OnlineLyrics";
 import type { Alignment, PastedLine, WriteRequest } from "./types";
 
@@ -20,6 +21,7 @@ const evidence = {
   source: "原句",
   order: "顺序推测，需核对",
   manual: "手动",
+  deepseek: "DeepSeek 建议，需核对",
 };
 
 export default function Workbench({
@@ -35,7 +37,9 @@ export default function Workbench({
   const [fieldId, setFieldId] = useState("");
   const [language, setLanguage] = useState("zh-Hans");
   const [draft, setDraft] = useState<Record<string, string>>({});
-  const [replaceIds, setReplaceIds] = useState<string[]>([]);
+  const [roles, setRoles] = useState<
+    Record<string, "source" | "translation" | "review">
+  >({});
   const [overwrite, setOverwrite] = useState(false);
   const [pasted, setPasted] = useState("");
   const [online, setOnline] = useState<PastedLine[]>([]);
@@ -56,6 +60,8 @@ export default function Workbench({
   const [protocol, setProtocol] = useState("responses");
   const [model, setModel] = useState("");
   const [key, setKey] = useState("");
+  const [deepSeekKey, setDeepSeekKey] = useState("");
+  const [deepSeekModel, setDeepSeekModel] = useState("deepseek-flash");
   useEffect(() => {
     let active = true;
     window.sonora.tagReadEmbedded(item.id).then(
@@ -78,11 +84,40 @@ export default function Workbench({
   }, [item.id]);
 
   const field = snapshot?.fields.find((value) => value.id === fieldId);
+  const classifications = { ...classifyLrc(field), ...roles };
   const lines =
-    field?.lines.filter((line) => !replaceIds.includes(line.id)) ?? [];
-  const dirty =
-    Object.values(draft).some((text) => text.trim()) || !!replaceIds.length;
-  const hasDraft = dirty || !!(pasted.trim() || online.length);
+    field?.lines.filter(
+      (line) => (classifications[line.id] ?? "source") === "source",
+    ) ?? [];
+  const marked = new Set(
+    Object.keys(classifications).filter(
+      (id) => classifications[id] !== "source",
+    ),
+  );
+  const companions = existingLrcTranslations(
+    field?.lines ?? [],
+    marked,
+    new Set(lines.map((line) => line.id)),
+  );
+  const existing = (id: string) =>
+    field?.lines.find((line) => line.id === id)?.translations?.[
+      language.toLowerCase()
+    ] ||
+    companions
+      .get(id)
+      ?.map((row) => row.text)
+      .join(" / ") ||
+    "";
+  const writable = (id: string) =>
+    !(companions.get(id) ?? []).some(
+      (row) => classifications[row.id] === "review",
+    ) &&
+    (overwrite || !existing(id));
+  const dirty = lines.some(
+    (line) => writable(line.id) && draft[line.id]?.trim(),
+  );
+  const hasEdits = Object.values(draft).some((text) => text.trim());
+  const hasDraft = hasEdits || !!pasted.trim();
   const requestClose = () => {
     if (busy) return;
     if (hasDraft) setConfirm("close");
@@ -91,7 +126,7 @@ export default function Workbench({
   function selectField(id: string) {
     setFieldId(id);
     setDraft({});
-    setReplaceIds([]);
+    setRoles({});
     setMatched(null);
     setOverwrite(false);
     setError("");
@@ -110,19 +145,60 @@ export default function Workbench({
       setBusy("");
     }
   }
-  function match() {
-    const rows = [...readPaste(pasted), ...online].map((row, index) => ({
-      ...row,
-      index: index + 1,
-    }));
+  function match(text = pasted, prepared = online, deepSeek = false) {
+    const rows = prepared.length ? prepared : readPaste(text);
     if (!rows.length || rows.length > 1500 || lines.length > 5000) {
       setError("请提供可匹配文本。每次最多匹配 1500 条片段和 5000 行原词。");
       return;
     }
     setError("");
-    setMatched({ rows, alignments: localAlignment(lines, rows, offset) });
+    const proposals = localAlignment(lines, rows, offset);
+    if (!deepSeek) {
+      setMatched({ rows, alignments: proposals });
+      return;
+    }
+    const anchors = proposals.filter((row) => row.evidence !== "order");
+    const ids = new Set(anchors.map((row) => row.id));
+    const used = new Set([
+      ...referenceRows(lines, rows),
+      ...anchors.flatMap((row) => row.fragments),
+    ]);
+    const pending = lines.filter((row) => !ids.has(row.id) && writable(row.id));
+    const fragments = rows.filter((row) => !used.has(row.index));
+    if (!pending.length || !fragments.length) {
+      setMatched({ rows, alignments: proposals });
+      setStatus("已按本地规则匹配，可继续核对");
+      return;
+    }
+    setMatched({ rows, alignments: anchors });
+    void run("正在用 DeepSeek 匹配", async () => {
+      const suggested = await window.sonora.tagMatchDeepSeek({
+        title: item.title,
+        artist: item.artist,
+        key: deepSeekKey,
+        model: deepSeekModel,
+        lines: pending.map(({ id, text }) => ({ id, text })),
+        fragments,
+      });
+      setMatched({ rows, alignments: [...anchors, ...suggested] });
+    });
+  }
+  function addText(text: string) {
+    if (!text.trim()) {
+      setError("剪贴板没有可匹配的文本");
+      return;
+    }
+    if (text.length > 160000) {
+      setError("歌词文本超过 160000 字符");
+      return;
+    }
+    setPasted(text);
+    setOnline([]);
+    setMatched(null);
+    match(text, []);
   }
   function setAlignment(id: string, index: number) {
+    if (index < 0) return;
     setMatched(
       (previous) =>
         previous && {
@@ -168,7 +244,7 @@ export default function Workbench({
                   <select
                     value={fieldId}
                     onChange={(e) => {
-                      if (dirty) {
+                      if (hasEdits) {
                         setNextField(e.target.value);
                         setConfirm("switch");
                       } else selectField(e.target.value);
@@ -198,13 +274,7 @@ export default function Workbench({
                     <input
                       type="checkbox"
                       checked={overwrite}
-                      onChange={(e) => {
-                        setOverwrite(e.target.checked);
-                        if (!e.target.checked) {
-                          setReplaceIds([]);
-                          setMatched(null);
-                        }
-                      }}
+                      onChange={(e) => setOverwrite(e.target.checked)}
                     />
                     替换已确认的旧译文
                   </label>
@@ -230,11 +300,7 @@ export default function Workbench({
                                 id: line.id,
                                 text: line.text,
                                 wanted:
-                                  !draft[line.id]?.trim() &&
-                                  (overwrite ||
-                                    !line.translations?.[
-                                      language.toLowerCase()
-                                    ]),
+                                  !draft[line.id]?.trim() && writable(line.id),
                               })),
                             },
                           );
@@ -281,8 +347,25 @@ export default function Workbench({
                       <button className="button primary">生成译文草稿</button>
                     </form>
                   </details>
-                  <details className="embedded-tools">
-                    <summary>粘贴并匹配</summary>
+                  <section className="embedded-tools" aria-label="粘贴并匹配">
+                    <div className="inline-actions">
+                      <button
+                        className="button primary"
+                        onClick={() =>
+                          void run("正在读取剪贴板", async () => {
+                            addText(await window.sonora.pasteLyrics());
+                          })
+                        }
+                      >
+                        粘贴并匹配
+                      </button>
+                      <button
+                        className="button secondary"
+                        onClick={() => setSearch(true)}
+                      >
+                        搜索在线歌词
+                      </button>
+                    </div>
                     <textarea
                       className="tag-lyrics-editor embedded-paste"
                       aria-label="粘贴歌词或译文"
@@ -290,28 +373,23 @@ export default function Workbench({
                       maxLength={160000}
                       onChange={(e) => {
                         setPasted(e.target.value);
+                        setOnline([]);
                         setMatched(null);
+                      }}
+                      onPaste={(e) => {
+                        const text = e.clipboardData.getData("text");
+                        if (!text) return;
+                        e.preventDefault();
+                        const target = e.currentTarget;
+                        addText(
+                          target.value.slice(0, target.selectionStart) +
+                            text +
+                            target.value.slice(target.selectionEnd),
+                        );
                       }}
                       placeholder="粘贴纯译文、双语歌词或带时间戳的 LRC"
                     />
                     <div className="inline-actions">
-                      <button
-                        className="button secondary"
-                        onClick={() => setSearch(true)}
-                      >
-                        搜索在线歌词
-                      </button>
-                      {online.length > 0 && (
-                        <button
-                          className="text-button"
-                          onClick={() => {
-                            setOnline([]);
-                            setMatched(null);
-                          }}
-                        >
-                          清除在线片段（{online.length} 行）
-                        </button>
-                      )}
                       <label className="tag-field">
                         时间偏移（毫秒）
                         <input
@@ -324,10 +402,49 @@ export default function Workbench({
                           }}
                         />
                       </label>
-                      <button className="button primary" onClick={match}>
+                      <button
+                        className="button secondary"
+                        onClick={() => match()}
+                      >
                         本地匹配
                       </button>
                     </div>
+                    <details className="embedded-tools">
+                      <summary>DeepSeek API 匹配</summary>
+                      <p className="tag-note">
+                        将未匹配的原词和候选译文发送给
+                        DeepSeek。结果可核对后应用。
+                      </p>
+                      <div className="inline-actions">
+                        <label className="tag-field">
+                          DeepSeek API Key
+                          <input
+                            type="password"
+                            autoComplete="off"
+                            value={deepSeekKey}
+                            onChange={(e) => setDeepSeekKey(e.target.value)}
+                          />
+                        </label>
+                        <label className="tag-field">
+                          DeepSeek 模型
+                          <input
+                            value={deepSeekModel}
+                            onChange={(e) => setDeepSeekModel(e.target.value)}
+                          />
+                        </label>
+                        <button
+                          className="button secondary"
+                          disabled={
+                            !pasted.trim() ||
+                            !deepSeekKey.trim() ||
+                            !deepSeekModel.trim()
+                          }
+                          onClick={() => match(pasted, online, true)}
+                        >
+                          使用 DeepSeek 匹配
+                        </button>
+                      </div>
+                    </details>
                     {matched && (
                       <>
                         <p className="tag-note">
@@ -349,7 +466,11 @@ export default function Workbench({
                                 </span>
                                 <select
                                   aria-label={`匹配片段 ${line.id}`}
-                                  value={alignment?.fragments[0] ?? 0}
+                                  value={
+                                    alignment && alignment.fragments.length > 1
+                                      ? -1
+                                      : (alignment?.fragments[0] ?? 0)
+                                  }
                                   onChange={(e) =>
                                     setAlignment(
                                       line.id,
@@ -358,6 +479,19 @@ export default function Workbench({
                                   }
                                 >
                                   <option value={0}>跳过此行</option>
+                                  {alignment &&
+                                    alignment.fragments.length > 1 && (
+                                      <option value={-1}>
+                                        {alignment.fragments
+                                          .map(
+                                            (index) =>
+                                              matched.rows.find(
+                                                (row) => row.index === index,
+                                              )?.text,
+                                          )
+                                          .join(" ")}
+                                      </option>
+                                    )}
                                   {matched.rows.map((row) => (
                                     <option key={row.index} value={row.index}>
                                       {row.index}. {row.text}
@@ -383,7 +517,10 @@ export default function Workbench({
                                 ...Object.fromEntries(
                                   matched.alignments.map((row) => [
                                     row.id,
-                                    rows.get(row.fragments[0]) ?? "",
+                                    row.fragments
+                                      .map((index) => rows.get(index))
+                                      .filter(Boolean)
+                                      .join(" "),
                                   ]),
                                 ),
                               }));
@@ -396,56 +533,69 @@ export default function Workbench({
                         )}
                       </>
                     )}
-                  </details>
+                  </section>
                   <div className="embedded-review" aria-label="原词与译文草稿">
-                    {field.lines.map((line) => (
+                    {lines.map((line) => (
                       <div className="embedded-line" key={line.id}>
                         <div>
                           <small>{line.time}</small>
                           <p>{line.text}</p>
-                          {line.translations?.[language.toLowerCase()] && (
-                            <small>
-                              已有译文 ·{" "}
-                              {line.translations[language.toLowerCase()]}
-                            </small>
+                          {existing(line.id) && (
+                            <small>已有译文 · {existing(line.id)}</small>
                           )}
                         </div>
-                        {replaceIds.includes(line.id) ? (
-                          <small>已标记为旧译文</small>
-                        ) : (
-                          <input
-                            aria-label={`译文 ${line.id}`}
-                            value={draft[line.id] ?? ""}
-                            placeholder="译文草稿"
-                            onChange={(e) =>
-                              setDraft((previous) => ({
-                                ...previous,
-                                [line.id]: e.target.value,
-                              }))
-                            }
-                          />
-                        )}
-                        {overwrite && !!line.sameTimeCandidates?.length && (
-                          <label className="checkbox-label">
-                            <input
-                              type="checkbox"
-                              checked={replaceIds.includes(line.id)}
-                              onChange={(e) => {
-                                const checked = e.target.checked;
-                                setReplaceIds((previous) =>
-                                  checked
-                                    ? [...previous, line.id]
-                                    : previous.filter((id) => id !== line.id),
-                                );
-                                setMatched(null);
-                              }}
-                            />
-                            此行是旧译文
-                          </label>
-                        )}
+                        <input
+                          aria-label={`译文 ${line.id}`}
+                          value={draft[line.id] ?? ""}
+                          disabled={!writable(line.id)}
+                          placeholder="译文草稿"
+                          onChange={(e) =>
+                            setDraft((previous) => ({
+                              ...previous,
+                              [line.id]: e.target.value,
+                            }))
+                          }
+                        />
                       </div>
                     ))}
                   </div>
+                  {field.lines.some(
+                    (line) => line.sameTimeCandidates?.length,
+                  ) && (
+                    <details className="embedded-tools">
+                      <summary>
+                        核对同时间戳歌词（{marked.size} 行已有译文或待核对）
+                      </summary>
+                      <div className="embedded-review">
+                        {field.lines
+                          .filter((line) => line.sameTimeCandidates?.length)
+                          .map((line) => (
+                            <label key={line.id} className="tag-field">
+                              <span>
+                                {line.time} · {line.text}
+                              </span>
+                              <select
+                                aria-label={`歌词行角色 ${line.id}`}
+                                value={classifications[line.id] ?? "source"}
+                                onChange={(e) => {
+                                  const role = e.target.value as
+                                    "source" | "translation" | "review";
+                                  setRoles((previous) => ({
+                                    ...previous,
+                                    [line.id]: role,
+                                  }));
+                                  setMatched(null);
+                                }}
+                              >
+                                <option value="source">原词</option>
+                                <option value="translation">已有译文</option>
+                                <option value="review">待核对，保留原样</option>
+                              </select>
+                            </label>
+                          ))}
+                      </div>
+                    </details>
+                  )}
                 </>
               )}
             </fieldset>
@@ -476,8 +626,20 @@ export default function Workbench({
           item={item}
           onClose={() => setSearch(false)}
           onAdd={(rows) => {
-            setOnline((previous) => [...previous, ...rows]);
-            setMatched(null);
+            const combined = [
+              ...(online.length ? online : readPaste(pasted)),
+              ...rows,
+            ].map((row, index) => ({ ...row, index: index + 1 }));
+            const visible = combined
+              .map((row) =>
+                row.milliseconds === null
+                  ? row.text
+                  : `[${Math.floor(Math.max(0, row.milliseconds) / 60000)}:${((Math.max(0, row.milliseconds) % 60000) / 1000).toFixed(3).padStart(6, "0")}]${row.text}`,
+              )
+              .join("\n");
+            setPasted(visible);
+            setOnline(combined);
+            match(visible, combined);
             setSearch(false);
             setStatus(`已加入 ${rows.length} 行在线歌词，可继续匹配`);
           }}
@@ -528,10 +690,23 @@ export default function Workbench({
                     overwrite,
                     translations: Object.fromEntries(
                       lines
-                        .filter((line) => draft[line.id]?.trim())
+                        .filter(
+                          (line) => writable(line.id) && draft[line.id]?.trim(),
+                        )
                         .map((line) => [line.id, draft[line.id]]),
                     ),
-                    lrcReplaceIds: replaceIds,
+                    lrcReplaceIds: overwrite
+                      ? lines
+                          .filter(
+                            (line) =>
+                              writable(line.id) && draft[line.id]?.trim(),
+                          )
+                          .flatMap((line) =>
+                            (companions.get(line.id) ?? []).map(
+                              (row) => row.id,
+                            ),
+                          )
+                      : [],
                     remove: action === "remove",
                   });
                 });

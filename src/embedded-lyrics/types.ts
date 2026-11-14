@@ -31,7 +31,7 @@ export interface EmbeddedLyrics {
 export interface Alignment {
   id: string;
   fragments: number[];
-  evidence: "timestamp" | "source" | "order" | "manual";
+  evidence: "timestamp" | "source" | "order" | "manual" | "deepseek";
 }
 
 export interface PastedLine {

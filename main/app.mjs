@@ -37,6 +37,7 @@ import {
 } from "./services/lyrics.mjs";
 import { TagEditor, readTags } from "./services/tag-editor.mjs";
 import { translateLyrics } from "./services/embedded-lyrics/translate.mjs";
+import { matchLyricsWithDeepSeek } from "./services/embedded-lyrics/match.mjs";
 import { supportsEmbeddedLyrics } from "./services/embedded-lyrics/files.mjs";
 import { MetadataMatcher } from "./services/metadata-match.mjs";
 import { fetchArtwork, normalizeArtwork } from "./services/artwork.mjs";
@@ -586,6 +587,7 @@ if (!app.requestSingleInstanceLock()) {
     bind("tagReadEmbedded", (id) => tagEditor.readEmbedded(id));
     bind("tagSaveEmbedded", (id, patch) => tagEditor.saveEmbedded(id, patch));
     bind("tagTranslateLyrics", translateLyrics);
+    bind("tagMatchDeepSeek", matchLyricsWithDeepSeek);
     bind("tagLyricDocument", (id) => metadataMatcher.lyricDocument(id));
     bind("tagSave", (id, patch) => tagEditor.save(id, patch));
     bind("tagSaveCopy", async (id, patch) => {
@@ -616,6 +618,11 @@ if (!app.requestSingleInstanceLock()) {
       if (typeof text !== "string" || !text.trim() || text.length > 4_000_000)
         throw Error("歌词文本为空或过长");
       clipboard.writeText(text);
+    });
+    bind("pasteLyrics", () => {
+      const text = clipboard.readText();
+      if (text.length > 160000) throw Error("剪贴板文本超过 160000 字符");
+      return text;
     });
     const artwork = async (url) => {
       if (url) return fetchArtwork(url, nativeImage);

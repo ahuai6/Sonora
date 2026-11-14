@@ -927,7 +927,7 @@ try {
     tagged.tag.title = "待匹配测试";
     tagged.tag.comment = "保留原标签";
     tagged.tag.lyrics =
-      "[00:00.00]<00:00.00>声屿<00:00.40>测试音轨\n[00:01.00]本地生成的验证音频";
+      "[00:00.00]<00:00.00>声屿<00:00.40>测试音轨\n[00:00.00]旧译文第一行\n[00:01.00]本地生成的验证音频\n[00:01.00]旧译文第二行";
     tagged.save();
   } finally {
     tagged.dispose();
@@ -953,6 +953,21 @@ try {
     exact: true,
   });
   await expect(workbench.getByLabel("内嵌字段")).toContainText(/LYRICS/i);
+  const draftTable = workbench.getByLabel("原词与译文草稿");
+  await expect(draftTable.locator(".embedded-line")).toHaveCount(2);
+  await expect(draftTable).toContainText("已有译文 · 旧译文第一行");
+  await expect(draftTable.locator(".embedded-line p")).toHaveText([
+    "声屿测试音轨",
+    "本地生成的验证音频",
+  ]);
+  await expect(
+    workbench.getByLabel("译文 l1.1", { exact: true }),
+  ).toBeDisabled();
+  await workbench.getByText(/核对同时间戳歌词/).click();
+  await workbench
+    .getByLabel("歌词行角色 l4.1", { exact: true })
+    .selectOption("translation");
+  await workbench.getByLabel("替换已确认的旧译文").check();
   await workbench.getByText("AI 翻译", { exact: true }).click();
   await workbench
     .getByLabel("API Base URL")
@@ -963,7 +978,6 @@ try {
     "合成模型译文 l1.1",
   );
   await workbench.getByText("AI 翻译", { exact: true }).click();
-  await workbench.getByText("粘贴并匹配", { exact: true }).click();
   await workbench
     .getByRole("button", { name: "搜索在线歌词", exact: true })
     .click();
@@ -976,25 +990,84 @@ try {
   await online.locator(".embedded-candidate").first().click();
   await expect(online.getByLabel("在线歌词预览文本")).toHaveValue(/Test track/);
   await online.getByRole("button", { name: "加入译文用于匹配" }).click();
-  await workbench
-    .getByRole("button", { name: "本地匹配", exact: true })
-    .click();
+  const paste = workbench.getByLabel("粘贴歌词或译文");
+  await expect(paste).toHaveValue(/Test track/);
+  await expect(
+    workbench.getByLabel("匹配片段 l2.1", { exact: true }),
+  ).toHaveCount(0);
   await workbench.getByRole("button", { name: "应用到译文草稿" }).click();
   await expect(workbench.getByLabel("译文 l1.1", { exact: true })).toHaveValue(
     "Test track",
   );
+  await app.evaluate(({ clipboard }) => {
+    const readText = clipboard.readText;
+    clipboard.readText = () => {
+      clipboard.readText = readText;
+      return "[00:00.00]手动粘贴第一行\n[00:01.00]手动粘贴第二行";
+    };
+  });
   await workbench
-    .getByRole("button", { name: "清除在线片段", exact: false })
+    .getByRole("button", { name: "粘贴并匹配", exact: true })
     .click();
-  await workbench
-    .getByLabel("粘贴歌词或译文")
-    .fill("[00:00.00]手动粘贴第一行\n[00:01.00]手动粘贴第二行");
-  await workbench
-    .getByRole("button", { name: "本地匹配", exact: true })
-    .click();
+  await expect(paste).toHaveValue(/手动粘贴第一行/);
+  await expect(
+    workbench.getByLabel("匹配片段 l1.1", { exact: true }),
+  ).toHaveValue("1");
   await workbench.getByRole("button", { name: "应用到译文草稿" }).click();
   await expect(workbench.getByLabel("译文 l1.1", { exact: true })).toHaveValue(
     "手动粘贴第一行",
+  );
+  await paste.fill("");
+  await paste.evaluate((node) => {
+    const clipboardData = new DataTransfer();
+    clipboardData.setData("text", "DeepSeek 候选片段");
+    node.dispatchEvent(
+      new ClipboardEvent("paste", {
+        clipboardData,
+        bubbles: true,
+        cancelable: true,
+      }),
+    );
+  });
+  await expect(paste).toHaveValue("DeepSeek 候选片段");
+  await app.evaluate(() => {
+    const fetch = globalThis.fetch;
+    globalThis.fetch = async (url, init) => {
+      if (String(url) !== "https://api.deepseek.com/chat/completions")
+        return fetch(url, init);
+      globalThis.fetch = fetch;
+      const body = JSON.parse(init.body);
+      const data = JSON.parse(body.messages[1].content);
+      if (
+        init.headers.Authorization !== "Bearer integration-fixture" ||
+        body.model !== "deepseek-flash" ||
+        data.lines.map((row) => row.id).join(",") !== "l1.1,l3.1" ||
+        data.fragments[0].text !== "DeepSeek 候选片段"
+      )
+        throw Error("Unexpected matching payload");
+      return Response.json({
+        choices: [
+          {
+            finish_reason: "stop",
+            message: {
+              content: JSON.stringify({
+                matches: [{ id: "l3.1", fragments: [1] }],
+              }),
+            },
+          },
+        ],
+      });
+    };
+  });
+  await workbench.getByText("DeepSeek API 匹配", { exact: true }).click();
+  await workbench.getByLabel("DeepSeek API Key").fill("integration-fixture");
+  await workbench.getByRole("button", { name: "使用 DeepSeek 匹配" }).click();
+  await expect(
+    workbench.getByLabel("匹配片段 l3.1", { exact: true }),
+  ).toHaveValue("1");
+  await workbench.getByRole("button", { name: "应用到译文草稿" }).click();
+  await expect(workbench.getByLabel("译文 l3.1", { exact: true })).toHaveValue(
+    "DeepSeek 候选片段",
   );
   assert.equal(
     parseContainer(fs.readFileSync(embeddedFile), ".flac").fields[0].text,
@@ -1010,9 +1083,11 @@ try {
     after.fields[0].text,
     /<00:00\.40>测试音轨\r?\n\[00:00\.00\]手动粘贴第一行/,
   );
+  assert.match(after.fields[0].text, /\[00:01\.00\]DeepSeek 候选片段/);
+  assert.doesNotMatch(after.fields[0].text, /旧译文/);
   verifyEdit(before, after, before.fields[0].id, after.fields[0].text);
   await editor.getByRole("button", { name: "关闭", exact: true }).click();
-  checks += 4;
+  checks += 7;
   assert.deepEqual(errors, []);
   const encrypted = await app.evaluate(({ safeStorage }) => ({
     available: safeStorage.isEncryptionAvailable(),

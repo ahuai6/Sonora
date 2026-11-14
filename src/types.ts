@@ -1,4 +1,9 @@
-import type { EmbeddedLyrics, WriteRequest } from "./embedded-lyrics/types";
+import type {
+  Alignment,
+  EmbeddedLyrics,
+  PastedLine,
+  WriteRequest,
+} from "./embedded-lyrics/types";
 
 export type Platform = "netease" | "qq" | "kugou";
 export type Quality =
@@ -188,6 +193,14 @@ export type TagArtwork = {
   height: number;
 };
 export interface API {
+  tagMatchDeepSeek(input: {
+    key: string;
+    model: string;
+    title: string;
+    artist: string;
+    lines: { id: string; text: string }[];
+    fragments: PastedLine[];
+  }): Promise<Alignment[]>;
   tagReadEmbedded(
     id: string,
   ): Promise<{ revision: string; fields: EmbeddedLyrics[] }>;
@@ -299,6 +312,7 @@ export interface API {
     hasWordTiming: boolean;
   }>;
   copyLyrics(text: string): Promise<void>;
+  pasteLyrics(): Promise<string>;
   saveSettings(
     patch: Partial<Settings> & { acceptedDisclaimer?: boolean },
   ): Promise<Settings>;
