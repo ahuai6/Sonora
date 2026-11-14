@@ -8,6 +8,7 @@ import {
   BrowserWindow,
   ipcMain,
   dialog,
+  clipboard,
   shell,
   safeStorage,
   protocol,
@@ -35,6 +36,8 @@ import {
   localLyricDocument,
 } from "./services/lyrics.mjs";
 import { TagEditor, readTags } from "./services/tag-editor.mjs";
+import { translateLyrics } from "./services/embedded-lyrics/translate.mjs";
+import { supportsEmbeddedLyrics } from "./services/embedded-lyrics/files.mjs";
 import { MetadataMatcher } from "./services/metadata-match.mjs";
 import { fetchArtwork, normalizeArtwork } from "./services/artwork.mjs";
 import { DownloadMetadata } from "./services/download-metadata.mjs";
@@ -153,6 +156,7 @@ if (!app.requestSingleInstanceLock()) {
         const mutating =
           [
             "tagSave",
+            "tagSaveEmbedded",
             "tagSaveCopy",
             "tagRestore",
             "scanLibrary",
@@ -449,6 +453,8 @@ if (!app.requestSingleInstanceLock()) {
         try {
           embedded = readTags(item.path).lyrics;
         } catch {}
+        if (!embedded && supportsEmbeddedLyrics(item.path))
+          embedded = await tagEditor.playbackLyrics(item.path).catch(() => "");
         const file = item.path.replace(/\.[^.]+$/, ".lrc");
         const text =
           embedded ||
@@ -577,6 +583,10 @@ if (!app.requestSingleInstanceLock()) {
       throw Error("未知音乐库操作");
     });
     bind("tagRead", (id) => tagEditor.read(id));
+    bind("tagReadEmbedded", (id) => tagEditor.readEmbedded(id));
+    bind("tagSaveEmbedded", (id, patch) => tagEditor.saveEmbedded(id, patch));
+    bind("tagTranslateLyrics", translateLyrics);
+    bind("tagLyricDocument", (id) => metadataMatcher.lyricDocument(id));
     bind("tagSave", (id, patch) => tagEditor.save(id, patch));
     bind("tagSaveCopy", async (id, patch) => {
       const item = library.known(id),
@@ -602,6 +612,11 @@ if (!app.requestSingleInstanceLock()) {
     bind("tagMatchLyrics", (id, options) =>
       metadataMatcher.lyrics(id, options),
     );
+    bind("copyLyrics", (text) => {
+      if (typeof text !== "string" || !text.trim() || text.length > 4_000_000)
+        throw Error("歌词文本为空或过长");
+      clipboard.writeText(text);
+    });
     const artwork = async (url) => {
       if (url) return fetchArtwork(url, nativeImage);
       const r = await dialog.showOpenDialog(win, {

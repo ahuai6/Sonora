@@ -1,3 +1,5 @@
+import type { EmbeddedLyrics, WriteRequest } from "./embedded-lyrics/types";
+
 export type Platform = "netease" | "qq" | "kugou";
 export type Quality =
   | "standard"
@@ -186,6 +188,26 @@ export type TagArtwork = {
   height: number;
 };
 export interface API {
+  tagReadEmbedded(
+    id: string,
+  ): Promise<{ revision: string; fields: EmbeddedLyrics[] }>;
+  tagSaveEmbedded(
+    id: string,
+    patch: WriteRequest & {
+      revision: string;
+      remove: boolean;
+    },
+  ): Promise<TagSaveResult>;
+  tagTranslateLyrics(input: {
+    baseURL: string;
+    key: string;
+    model: string;
+    protocol: string;
+    language: string;
+    song: { title: string; artist: string };
+    lines: { id: string; text: string; wanted: boolean }[];
+  }): Promise<Record<string, string>>;
+  tagLyricDocument(id: string): Promise<Lyrics>;
   bootstrap(): Promise<Bootstrap>;
   workspace(action: string, input?: Record<string, any>): Promise<any>;
   probeAudio(url: string): Promise<AudioInfo>;
@@ -276,6 +298,7 @@ export interface API {
     format: string;
     hasWordTiming: boolean;
   }>;
+  copyLyrics(text: string): Promise<void>;
   saveSettings(
     patch: Partial<Settings> & { acceptedDisclaimer?: boolean },
   ): Promise<Settings>;

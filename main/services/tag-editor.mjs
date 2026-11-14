@@ -196,23 +196,56 @@ export class TagEditor {
       { copyTo },
     );
   }
-  async writeTags(temp, input) {
-    if (isMainThread)
-      return new Promise((resolve, reject) => {
-        const worker = new Worker(
-          new URL("./tag-worker.mjs", import.meta.url),
-          { workerData: { file: temp, input } },
-        );
-        let settled = false;
-        worker.once("message", (result) => {
-          settled = true;
-          result.error ? reject(Error(result.error)) : resolve();
-        });
-        worker.once("error", reject);
-        worker.once("exit", (code) => {
-          if (!settled) reject(Error("标签写入进程意外退出 (" + code + ")"));
-        });
+  async readEmbedded(id) {
+    const file = this.library.known(id).path;
+    const before = revision(await fs.promises.stat(file));
+    const fields = await this.runWorker(file, null, "readLyrics");
+    if (before !== revision(await fs.promises.stat(file)))
+      throw Error("读取期间文件已改变，请重新打开编辑器");
+    return { revision: before, fields };
+  }
+  async playbackLyrics(file) {
+    return this.runWorker(file, null, "readPlaybackLyrics");
+  }
+  async saveEmbedded(id, patch) {
+    if (
+      typeof patch?.fieldId !== "string" ||
+      typeof patch.remove !== "boolean" ||
+      typeof patch.overwrite !== "boolean" ||
+      typeof patch.language !== "string" ||
+      !patch.translations ||
+      typeof patch.translations !== "object" ||
+      Array.isArray(patch.translations) ||
+      Object.keys(patch.translations).length > 5000 ||
+      !Array.isArray(patch.lrcReplaceIds) ||
+      patch.lrcReplaceIds.length > 5000 ||
+      patch.lrcReplaceIds.some((id) => typeof id !== "string")
+    )
+      throw Error("歌词字段修改参数无效");
+    return this.commit(
+      id,
+      patch.revision,
+      (file) => this.runWorker(file, patch, "writeLyrics"),
+      { singleLink: true },
+    );
+  }
+  runWorker(file, input, operation) {
+    return new Promise((resolve, reject) => {
+      const worker = new Worker(new URL("./tag-worker.mjs", import.meta.url), {
+        workerData: { file, input, operation },
+        execArgv: [],
       });
+      worker.once("message", ({ error, result }) =>
+        error ? reject(Error(error)) : resolve(result),
+      );
+      worker.once("error", reject);
+      worker.once("exit", (code) =>
+        reject(Error(`标签工作进程退出（${code}）`)),
+      );
+    });
+  }
+  async writeTags(temp, input) {
+    if (isMainThread) return this.runWorker(temp, input);
     const f = File.createFromPath(temp);
     try {
       if (!f.isWritable || f.isPossiblyCorrupt)
@@ -309,7 +342,12 @@ export class TagEditor {
       fs.promises.copyFile(backupFile, temp),
     );
   }
-  async commit(id, expectedRevision, write, { copyTo } = {}) {
+  async commit(
+    id,
+    expectedRevision,
+    write,
+    { copyTo, singleLink = false } = {},
+  ) {
     const item = this.library.known(id);
     if (
       copyTo &&
@@ -331,6 +369,8 @@ export class TagEditor {
     try {
       if (!copyTo) resume = await this.beforeWrite?.(file);
       const stat = await fs.promises.stat(file);
+      if (singleLink && stat.nlink !== 1)
+        throw Error("此文件存在硬链接，无法安全写回歌词");
       if (!expectedRevision || revision(stat) !== expectedRevision)
         throw Error("文件已发生变化，请重新打开编辑器，避免覆盖外部修改");
       await fs.promises.copyFile(file, temp, fs.constants.COPYFILE_EXCL);

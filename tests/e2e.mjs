@@ -7,6 +7,11 @@ import http from "node:http";
 import { once } from "node:events";
 import { spawn } from "node:child_process";
 import assert from "node:assert/strict";
+import { File } from "node-taglib-sharp";
+import {
+  parseContainer,
+  verifyEdit,
+} from "../main/services/embedded-lyrics/container.mjs";
 fs.mkdirSync("test-artifacts", { recursive: true });
 const dir = fs.mkdtempSync(path.resolve("test-artifacts/e2e-"));
 const music = path.join(dir, "music");
@@ -42,10 +47,28 @@ const song = (p, n = 1) => ({
   duration: 2,
 });
 const config = JSON.parse(fs.readFileSync("profiles/providers.json", "utf8"));
-const server = http.createServer((req, res) => {
+const server = http.createServer(async (req, res) => {
   const u = new URL(req.url, base || "http://localhost");
   const p = u.searchParams.get("platform") || "netease";
   const op = u.pathname;
+  if (op === "/translation-fixture/responses") {
+    let body = "";
+    for await (const part of req) body += part;
+    const { input } = JSON.parse(body);
+    const request = JSON.parse(input[1].content);
+    res.setHeader("Content-Type", "application/json");
+    res.end(
+      JSON.stringify({
+        output_text: JSON.stringify({
+          lines: request.wanted.map((id) => ({
+            id,
+            translation: "合成模型译文 " + id,
+          })),
+        }),
+      }),
+    );
+    return;
+  }
   if (op === "/search" && searchDelay) {
     const end = res.end.bind(res),
       delay = searchDelay;
@@ -194,7 +217,7 @@ const server = http.createServer((req, res) => {
             },
             ytlrc: { lyric: "[00:00]Test track\n[00:01]Generated audio" },
           }
-        : { lyric: lrc };
+        : { lyric: lrc + `\n[00:01.50]${p} fixture lyrics` };
   else if (op === "/resolve") {
     const url = base + "/audio";
     body =
@@ -460,6 +483,16 @@ try {
   checks++;
   await editor.getByLabel("标签曲名", { exact: true }).fill("本地标签已修改");
   await editor.getByLabel("标签专辑", { exact: true }).fill("手动专辑");
+  await editor.getByRole("button", { name: "内嵌歌词", exact: true }).click();
+  const embeddedBeforePreview = await editor
+    .getByLabel("内嵌歌词内容")
+    .inputValue();
+  const writes = [];
+  await app.evaluate(({ clipboard }) => {
+    const originalWrite = clipboard.writeText;
+    globalThis.testClipboard = { originalWrite, writes: [] };
+    clipboard.writeText = (text) => globalThis.testClipboard.writes.push(text);
+  });
   await editor.getByRole("button", { name: "在线匹配", exact: true }).click();
   for (const source of ["netease", "qq", "kugou", "musicbrainz", "lrclib"]) {
     await editor
@@ -476,12 +509,63 @@ try {
         lrclib: "LRCLIB",
       }[source],
     );
-    if (source === "musicbrainz")
+    const previewButton = editor
+      .locator(".tag-candidate")
+      .first()
+      .getByRole("button", { name: "预览并复制歌词", exact: true });
+    if (source === "musicbrainz") {
+      await expect(previewButton).toHaveCount(0);
       await editor
         .getByRole("button", { name: "采用封面", exact: true })
         .first()
         .click();
+    } else {
+      await previewButton.click();
+      const preview = page.getByRole("dialog", {
+        name: "匹配歌词预览",
+        exact: true,
+      });
+      const text = preview.getByLabel("匹配歌词内容");
+      await expect(text).toHaveValue(
+        new RegExp(
+          source === "netease"
+            ? "\\[00:00\\.000\\]Test track"
+            : source === "lrclib"
+              ? "LRCLIB fixture lyrics"
+              : source + " fixture lyrics",
+        ),
+      );
+      assert.deepEqual(
+        await app.evaluate(() => globalThis.testClipboard.writes),
+        writes,
+      );
+      await preview
+        .getByRole("button", { name: "复制歌词", exact: true })
+        .click();
+      await expect(preview.getByRole("status")).toHaveText("已复制到剪贴板");
+      const captured = await app.evaluate(
+        () => globalThis.testClipboard.writes,
+      );
+      assert.equal(captured.length, writes.length + 1);
+      const copied = captured.at(-1);
+      assert.equal(copied.replaceAll("\r\n", "\n"), await text.inputValue());
+      if (source === "netease") assert.match(copied, /<00:00\.400>/);
+      writes.push(copied);
+      await page.keyboard.press("Escape");
+      await expect(preview).toHaveCount(0);
+      await expect(previewButton).toBeFocused();
+      checks++;
+    }
   }
+  await app.evaluate(({ clipboard }) => {
+    clipboard.writeText = globalThis.testClipboard.originalWrite;
+    delete globalThis.testClipboard;
+  });
+  await editor.getByRole("button", { name: "内嵌歌词", exact: true }).click();
+  await expect(editor.getByLabel("内嵌歌词内容")).toHaveValue(
+    embeddedBeforePreview,
+  );
+  await editor.getByRole("button", { name: "在线匹配", exact: true }).click();
   await editor
     .getByRole("button", { name: "获取歌词", exact: true })
     .first()
@@ -774,8 +858,36 @@ try {
     path: "test-artifacts/tag-narrow-fixed.png",
     animations: "disabled",
   });
+  await narrowEditor
+    .getByRole("button", { name: "在线匹配", exact: true })
+    .click();
+  await narrowEditor.getByRole("button", { name: "搜索", exact: true }).click();
+  await narrowEditor
+    .getByRole("button", { name: "采用标签", exact: true })
+    .first()
+    .click();
+  await expect(
+    narrowEditor.getByLabel("标签年份", { exact: true }),
+  ).toBeVisible();
+  const discard = page.getByRole("dialog", {
+    name: "放弃未保存的修改？",
+    exact: true,
+  });
+  await narrowEditor.getByRole("button", { name: "取消", exact: true }).click();
+  await discard.getByRole("button", { name: "继续编辑", exact: true }).click();
+  await expect(
+    narrowEditor.getByRole("button", { name: "保存到文件" }),
+  ).toBeEnabled();
+  await narrowEditor.getByRole("button", { name: "关闭", exact: true }).click();
+  await expect(discard).toBeVisible();
   await page.keyboard.press("Escape");
+  await expect(discard).toHaveCount(0);
+  await page.keyboard.press("Escape");
+  await discard
+    .getByRole("button", { name: "放弃修改并关闭", exact: true })
+    .click();
   await expect(narrowEditor).toHaveCount(0);
+  assert(fs.readFileSync(originalPath).equals(originalBytes));
   checks++;
   await page.evaluate(() => document.querySelector("audio").pause());
   const downloadNav = page
@@ -808,6 +920,99 @@ try {
   await page.getByLabel("信息密度", { exact: true }).selectOption("compact");
   await expect(page.locator(".app-shell")).toHaveClass(/compact-density/);
   checks++;
+  const embeddedFile = path.join(dir, "translation-source.flac");
+  fs.copyFileSync("tests/fixtures/tag-tone.flac", embeddedFile);
+  const tagged = File.createFromPath(embeddedFile);
+  try {
+    tagged.tag.title = "待匹配测试";
+    tagged.tag.comment = "保留原标签";
+    tagged.tag.lyrics =
+      "[00:00.00]<00:00.00>声屿<00:00.40>测试音轨\n[00:01.00]本地生成的验证音频";
+    tagged.save();
+  } finally {
+    tagged.dispose();
+  }
+  const before = parseContainer(fs.readFileSync(embeddedFile), ".flac");
+  await app.evaluate(({ dialog }, file) => {
+    dialog.showOpenDialog = async () => ({
+      canceled: false,
+      filePaths: [file],
+    });
+  }, embeddedFile);
+  await page.getByRole("button", { name: "本地音乐", exact: true }).click();
+  await page.getByRole("button", { name: "导入音乐", exact: true }).click();
+  await page
+    .getByRole("button", { name: "编辑 待匹配测试 标签", exact: true })
+    .click();
+  await editor.getByRole("button", { name: "内嵌歌词", exact: true }).click();
+  await editor
+    .getByRole("button", { name: "翻译与匹配内嵌歌词", exact: true })
+    .click();
+  const workbench = page.getByRole("dialog", {
+    name: "内嵌歌词翻译",
+    exact: true,
+  });
+  await expect(workbench.getByLabel("内嵌字段")).toContainText(/LYRICS/i);
+  await workbench.getByText("AI 翻译", { exact: true }).click();
+  await workbench
+    .getByLabel("API Base URL")
+    .fill(base + "/translation-fixture");
+  await workbench.getByLabel("模型 ID").fill("test-model");
+  await workbench.getByRole("button", { name: "生成译文草稿" }).click();
+  await expect(workbench.getByLabel("译文 l1.1", { exact: true })).toHaveValue(
+    "合成模型译文 l1.1",
+  );
+  await workbench.getByText("AI 翻译", { exact: true }).click();
+  await workbench.getByText("粘贴并匹配", { exact: true }).click();
+  await workbench
+    .getByRole("button", { name: "搜索在线歌词", exact: true })
+    .click();
+  const online = page.getByRole("dialog", {
+    name: "搜索在线歌词",
+    exact: true,
+  });
+  await online.getByLabel("在线歌词来源").selectOption("netease");
+  await online.getByRole("button", { name: "搜索歌词", exact: true }).click();
+  await online.locator(".embedded-candidate").first().click();
+  await expect(online.getByLabel("在线歌词预览文本")).toHaveValue(/Test track/);
+  await online.getByRole("button", { name: "加入译文用于匹配" }).click();
+  await workbench
+    .getByRole("button", { name: "本地匹配", exact: true })
+    .click();
+  await workbench.getByRole("button", { name: "应用到译文草稿" }).click();
+  await expect(workbench.getByLabel("译文 l1.1", { exact: true })).toHaveValue(
+    "Test track",
+  );
+  await workbench
+    .getByRole("button", { name: "清除在线片段", exact: false })
+    .click();
+  await workbench
+    .getByLabel("粘贴歌词或译文")
+    .fill("[00:00.00]手动粘贴第一行\n[00:01.00]手动粘贴第二行");
+  await workbench
+    .getByRole("button", { name: "本地匹配", exact: true })
+    .click();
+  await workbench.getByRole("button", { name: "应用到译文草稿" }).click();
+  await expect(workbench.getByLabel("译文 l1.1", { exact: true })).toHaveValue(
+    "手动粘贴第一行",
+  );
+  assert.equal(
+    parseContainer(fs.readFileSync(embeddedFile), ".flac").fields[0].text,
+    before.fields[0].text,
+  );
+  await workbench
+    .getByRole("button", { name: "写回原字段", exact: true })
+    .click();
+  await page.getByRole("button", { name: "确认写回", exact: true }).click();
+  await expect(workbench).toHaveCount(0);
+  const after = parseContainer(fs.readFileSync(embeddedFile), ".flac");
+  assert.match(
+    after.fields[0].text,
+    /<00:00\.40>测试音轨\r?\n\[00:00\.00\]手动粘贴第一行/,
+  );
+  verifyEdit(before, after, before.fields[0].id, after.fields[0].text);
+  await editor.getByRole("button", { name: "关闭", exact: true }).click();
+  checks += 4;
   assert.deepEqual(errors, []);
   const encrypted = await app.evaluate(({ safeStorage }) => ({
     available: safeStorage.isEncryptionAvailable(),

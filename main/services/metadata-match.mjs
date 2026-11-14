@@ -233,7 +233,11 @@ export class MetadataMatcher {
       `${local.title} ${local.artist}`.trim();
     if (!query) throw Error("请输入曲名或歌手");
     const sources =
-      source === "all" ? ["netease", "qq", "kugou", "musicbrainz"] : [source];
+      source === "all"
+        ? ["netease", "qq", "kugou", "musicbrainz"]
+        : source === "all-lyrics"
+          ? ["netease", "qq", "kugou", "lrclib"]
+          : [source];
     if (
       sources.some(
         (s) => !["netease", "qq", "kugou", "musicbrainz", "lrclib"].includes(s),
@@ -366,7 +370,7 @@ export class MetadataMatcher {
     c.cover = url;
     return url;
   }
-  async lyrics(id, { format = "auto", bilingual = true } = {}) {
+  async lyricDocument(id) {
     const c = this.known(id);
     let doc;
     if (c.track) doc = await this.providers.lyrics(c.track);
@@ -379,6 +383,10 @@ export class MetadataMatcher {
       throw Error(
         "MusicBrainz 不提供歌词，请选择网易云、QQ、酷狗或 LRCLIB 的结果",
       );
+    return doc;
+  }
+  async lyrics(id, { format = "auto", bilingual = true } = {}) {
+    const doc = await this.lyricDocument(id);
     const out = exportLyrics(doc, { format, bilingual });
     return {
       text: out.text,

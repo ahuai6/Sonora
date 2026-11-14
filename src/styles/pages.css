@@ -372,3 +372,61 @@
 .empty p {
   font-size: 12px;
 }
+.embedded-fields {
+  border: 0;
+  margin: 0;
+  padding: 0;
+  min-width: 0;
+  display: grid;
+  gap: 12px;
+}
+.embedded-tools {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 10px;
+}
+.embedded-tools > summary {
+  cursor: pointer;
+}
+.embedded-ai,
+.embedded-review {
+  display: grid;
+  gap: 10px;
+  margin: 10px 0;
+}
+.embedded-ai {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.embedded-review {
+  max-height: 280px;
+  overflow: auto;
+}
+.embedded-line {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  padding: 8px;
+  border-bottom: 1px solid var(--line);
+}
+.embedded-line p,
+.embedded-line small {
+  overflow-wrap: anywhere;
+}
+.embedded-paste {
+  height: 115px;
+}
+.embedded-offset {
+  width: 105px;
+}
+.embedded-candidate {
+  display: grid;
+  gap: 5px;
+  width: 100%;
+  text-align: left;
+  padding: 10px;
+  border-bottom: 1px solid var(--line);
+}
+.embedded-candidate:hover {
+  background: var(--hover);
+}

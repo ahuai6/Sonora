@@ -2177,14 +2177,6 @@ button:active:not(:disabled) {
   border-radius: 7px;
   overflow-wrap: anywhere;
 }
-.tag-discard {
-  display: flex;
-  gap: 18px;
-  justify-content: flex-end;
-  font-size: 12px;
-  margin-top: 14px;
-  color: var(--muted);
-}
 .tag-footer {
   justify-content: space-between;
 }
@@ -2578,10 +2570,6 @@ button:active:not(:disabled) {
   flex-shrink: 0;
   max-height: 100px;
   overflow-y: auto;
-}
-.tag-discard {
-  flex-shrink: 0;
-  flex-wrap: wrap;
 }
 body:has([role="dialog"]) .toast-stack {
   top: 8px;

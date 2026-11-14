@@ -128,6 +128,31 @@ export function parseTtml(text) {
   if (/<!DOCTYPE|<!ENTITY/i.test(text))
     throw Error("歌词 XML 包含不支持的实体");
   const doc = new DOMParser().parseFromString(text, "application/xml");
+  const metadata = "http://www.w3.org/ns/ttml#metadata";
+  const apple = "http://music.apple.com/lyric-ttml-internal";
+  const translations = Array.from(
+    doc.getElementsByTagNameNS(apple, "translation"),
+  );
+  const preferred =
+    translations.find((node) =>
+      /^zh(?:-|$)/i.test(node.getAttribute("xml:lang")),
+    ) ?? translations[0];
+  const translated = new Map(
+    Array.from(preferred?.getElementsByTagNameNS(apple, "text") ?? []).map(
+      (node) => [
+        node.getAttribute("for"),
+        Array.from(node.childNodes)
+          .filter(
+            (child) =>
+              child.nodeType === 3 ||
+              child.getAttributeNS?.(metadata, "role") !== "x-bg",
+          )
+          .map((child) => child.textContent)
+          .join("")
+          .trim(),
+      ],
+    ),
+  );
   return Array.from(doc.getElementsByTagName("p"))
     .map((p) => {
       const words = [];
@@ -140,7 +165,8 @@ export function parseTtml(text) {
           return;
         }
         if (n.nodeType !== 1) return;
-        const role = n.getAttribute("ttm:role");
+        const role =
+          n.getAttributeNS(metadata, "role") || n.getAttribute("ttm:role");
         if (role === "x-translation") {
           translation += n.textContent || "";
           return;
@@ -164,7 +190,8 @@ export function parseTtml(text) {
         end: time(p.getAttribute("end")),
         text: body.trim(),
         words,
-        translation,
+        translation:
+          translation || translated.get(p.getAttributeNS(apple, "key")) || "",
         romanization,
       };
     })

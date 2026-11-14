@@ -1,4 +1,6 @@
 import LyricEditorPreview from "./LyricEditorPreview";
+import MatchedLyricsPreview from "./MatchedLyricsPreview";
+import LyricsWorkbench from "./embedded-lyrics/Workbench";
 import { useEffect, useState, useRef } from "react";
 import {
   Search,
@@ -75,7 +77,12 @@ export default function TagEditor({
     [bilingual, setBilingual] = useState(true),
     [lyricSource, setLyricSource] = useState(""),
     [coverUrl, setCoverUrl] = useState(""),
-    [confirmClose, setConfirmClose] = useState(false);
+    [confirmClose, setConfirmClose] = useState(false),
+    [previewCandidate, setPreviewCandidate] = useState<TagCandidate | null>(
+      null,
+    );
+  const writing = busy === "save" || busy === "restore";
+  const [lyricsWorkbench, setLyricsWorkbench] = useState(false);
   const [matchNote, setMatchNote] = useState("");
   const generation = useRef(0),
     mounted = useRef(true),
@@ -125,6 +132,7 @@ export default function TagEditor({
     try {
       await fn();
     } catch (e) {
+      if (!mounted.current) return;
       setError(
         (e as Error).message.replace(
           /^Error invoking remote method '[^']+': (?:Error: )?/,
@@ -158,6 +166,7 @@ export default function TagEditor({
   }
   async function adopt(c: TagCandidate) {
     const result = await window.sonora.tagMatchDetails(c.matchId);
+    if (!mounted.current) return;
     Object.entries(result.tags)
       .filter(([, v]) => v !== "" && v !== 0)
       .forEach(([key]) => editedFields.current.add(key));
@@ -182,14 +191,14 @@ export default function TagEditor({
   }
   async function artwork(url?: string) {
     const r = await window.sonora.tagArtwork(url);
-    if (r) {
+    if (r && mounted.current) {
       setCover(r.dataUrl);
       setDirty(true);
     }
   }
   async function matchCover(c: TagCandidate) {
     const r = await window.sonora.tagMatchCover(c.matchId);
-    if (r) {
+    if (r && mounted.current) {
       setCover(r.dataUrl);
       setDirty(true);
       notify("封面已载入，保存后写入文件");
@@ -200,6 +209,7 @@ export default function TagEditor({
       format,
       bilingual,
     });
+    if (!mounted.current) return;
     setLyrics(r.text);
     setWriteLyrics(true);
     setLyricSource(r.source);
@@ -237,10 +247,10 @@ export default function TagEditor({
     });
   }
   const requestClose = () => {
-    if (busy) return;
+    if (writing) return;
     dirty ? setConfirmClose(true) : onClose();
   };
-  return (
+  const editor = (
     <Modal
       title="编辑音乐标签"
       subtitle={`${item.format} · ${duration(item.duration)} · ${item.path}`}
@@ -463,16 +473,25 @@ export default function TagEditor({
                                 </button>
                               )}
                               {c.source !== "musicbrainz" && (
-                                <button
-                                  className="text-button"
-                                  disabled={!!busy}
-                                  onClick={() =>
-                                    action(c.matchId, () => matchLyrics(c))
-                                  }
-                                >
-                                  <FileText size={13} />
-                                  获取歌词
-                                </button>
+                                <>
+                                  <button
+                                    className="text-button"
+                                    disabled={!!busy}
+                                    onClick={() =>
+                                      action(c.matchId, () => matchLyrics(c))
+                                    }
+                                  >
+                                    <FileText size={13} />
+                                    获取歌词
+                                  </button>
+                                  <button
+                                    className="text-button"
+                                    disabled={!!busy}
+                                    onClick={() => setPreviewCandidate(c)}
+                                  >
+                                    预览并复制歌词
+                                  </button>
+                                </>
                               )}
                             </div>
                           </div>
@@ -488,6 +507,18 @@ export default function TagEditor({
                 )}
                 {tab === "lyrics" && (
                   <div className="tag-lyrics">
+                    <button
+                      className="button secondary"
+                      disabled={!!busy || dirty}
+                      title={
+                        dirty
+                          ? "请先保存当前标签修改，或重新打开编辑器"
+                          : undefined
+                      }
+                      onClick={() => setLyricsWorkbench(true)}
+                    >
+                      翻译与匹配内嵌歌词
+                    </button>
                     <div className="inline-actions">
                       <select
                         aria-label="匹配歌词格式"
@@ -566,20 +597,6 @@ export default function TagEditor({
                 {error || snapshot?.warning}
               </p>
             )}
-            {confirmClose && (
-              <div className="tag-discard">
-                <span>尚有未保存的修改。</span>
-                <button
-                  className="text-button"
-                  onClick={() => setConfirmClose(false)}
-                >
-                  继续编辑
-                </button>
-                <button className="text-button" onClick={onClose}>
-                  放弃修改并关闭
-                </button>
-              </div>
-            )}
             <div className="modal-footer tag-footer">
               <button
                 className="button secondary compact"
@@ -615,7 +632,7 @@ export default function TagEditor({
                 </button>
                 <button
                   className="button secondary"
-                  disabled={!!busy}
+                  disabled={writing}
                   onClick={requestClose}
                 >
                   取消
@@ -638,5 +655,62 @@ export default function TagEditor({
         )}
       </div>
     </Modal>
+  );
+  return (
+    <>
+      {editor}
+      {lyricsWorkbench && (
+        <LyricsWorkbench
+          item={item}
+          onClose={() => setLyricsWorkbench(false)}
+          onSave={async (patch) => {
+            await beforeSave();
+            try {
+              const result = await window.sonora.tagSaveEmbedded(
+                item.id,
+                patch,
+              );
+              onSaved(result);
+              load(result.editor);
+              setLyricsWorkbench(false);
+              notify(
+                patch.remove
+                  ? "已删除选中的歌词字段"
+                  : "译文已写回原歌词字段，原文件已备份",
+              );
+            } finally {
+              await afterSave();
+            }
+          }}
+        />
+      )}
+      {confirmClose && (
+        <Modal
+          title="放弃未保存的修改？"
+          subtitle="关闭标签编辑器会丢弃本次未保存的标签、封面和歌词修改。"
+          onClose={() => setConfirmClose(false)}
+        >
+          <div className="modal-footer">
+            <button
+              className="button secondary"
+              onClick={() => setConfirmClose(false)}
+            >
+              继续编辑
+            </button>
+            <button className="button primary" onClick={onClose}>
+              放弃修改并关闭
+            </button>
+          </div>
+        </Modal>
+      )}
+      {previewCandidate && (
+        <MatchedLyricsPreview
+          candidate={previewCandidate}
+          format={format}
+          bilingual={bilingual}
+          onClose={() => setPreviewCandidate(null)}
+        />
+      )}
+    </>
   );
 }
